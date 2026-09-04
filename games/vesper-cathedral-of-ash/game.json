@@ -1,0 +1,8 @@
+{
+  "slug": "vesper-cathedral-of-ash",
+  "title": "VESPER: Cathedral of Ash",
+  "version": "ASTRA",
+  "description": "A Three.js orbital-cathedral horde shooter with full 3D GLB weapons and animated soldier enemies. Revenant assault rifle with red-dot ADS, Absolution pump shotgun, and Last Word marksman rifle each have distinct spring recoil, weapon inertia, reload choreography, muzzle flash, physical casings, smoke, fragments, decals, hit reactions and layered procedural audio. Fight through endless waves beneath Saturn with bloom, PBR textures, custom shaders and a separate viewmodel render pass.",
+  "accent": "#ff5939",
+  "tags": ["Game", "FPS", "Three.js", "WebGL", "GLSL", "Astra", "3D Models", "Procedural Audio"]
+}
