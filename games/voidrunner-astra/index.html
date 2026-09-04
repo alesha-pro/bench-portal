@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080c14" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>VOIDRUNNER — Orbital Combat League</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=Barlow:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script type="module" crossorigin src="./assets/index-oRakiURx.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-COtHzPQG.css">
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="vignette"></div>
+    <div id="damage"></div>
+    <header>
+      <a class="brand" href="./" aria-label="Voidrunner home"
+        ><svg viewBox="0 0 42 34">
+          <path d="M1 3h10l10 18L31 3h10L21 34Z" fill="currentColor" />
+          <path d="M15 3h12l-6 10Z" fill="#ff5d32" /></svg
+        >VOIDRUNNER<span>®</span></a
+      >
+      <div class="top-meta">
+        <span class="live-dot"></span> ORBITAL COMBAT LEAGUE
+        <span class="muted">//</span> <b>SEASON 09</b>
+      </div>
+      <div class="top-actions">
+        <button id="sound" aria-label="Toggle sound">
+          SOUND <span id="sound-state">OFF</span
+          ><span class="sound-icon">▂▅▃▇</span></button
+        ><button id="help" aria-label="Show controls">?</button>
+      </div>
+    </header>
+    <main id="menu">
+      <div class="intro">
+        <div class="eyebrow">
+          <span class="orange">●</span> NO GRAVITY. NO MERCY.
+        </div>
+        <h1>LEAVE<br />NOTHING<br /><span>BEHIND.</span></h1>
+        <p>
+          Ride the edge of a dying world.<br />Break the sound barrier. Take the
+          crown.
+        </p>
+        <div class="event">
+          <span class="event-icon">↗</span>
+          <div>
+            <span class="micro">CURRENT EVENT</span
+            ><strong>THE HALO CIRCUIT</strong
+            ><span class="location">NEREID · FRACTURED OCEAN WORLD</span>
+          </div>
+          <span class="event-class">CLASS<br /><b>Ω</b></span>
+        </div>
+      </div>
+      <div class="world-label">
+        <span class="orange">01 /</span> NEREID EXCLUSION ZONE
+        <div>ALTITUDE 12,840 M <span>−218°C</span></div>
+      </div>
+      <div class="craft-caption">
+        <span id="craft-index">02</span>
+        <div>
+          <span class="micro">YOUR RIDE</span><b id="craft-name">WRAITH</b>
+        </div>
+        <i></i><span class="craft-class" id="craft-class">INTERCEPTOR</span>
+      </div>
+      <div class="bottom-menu">
+        <section class="craft-select">
+          <div class="section-line">
+            <span>SELECT YOUR CRAFT</span><span class="muted">01 — 03</span>
+          </div>
+          <div class="crafts">
+            <button class="craft" data-craft="0">
+              <span class="craft-top">01 <i>SPD / ATK</i></span
+              ><svg viewBox="0 0 100 44">
+                <path
+                  d="M50 1 58 22 82 39 57 34 50 42 43 34 18 39 42 22Z"
+                /></svg
+              ><strong>NEEDLE</strong><small>LIGHT / SPEEDER</small></button
+            ><button class="craft selected" data-craft="1">
+              <span class="craft-top">02 <i>AGI / BAL</i></span
+              ><svg viewBox="0 0 100 44">
+                <path
+                  d="M50 1 60 24 78 12 85 40 58 34 50 41 42 34 15 40 22 12 40 24Z"
+                /></svg
+              ><strong>WRAITH</strong
+              ><small>MEDIUM / INTERCEPTOR</small></button
+            ><button class="craft" data-craft="2">
+              <span class="craft-top">03 <i>DEF / RAM</i></span
+              ><svg viewBox="0 0 100 44">
+                <path
+                  d="M42 7h16l5 16 10-15h12l5 33H62l-12-5-12 5H10l5-33h12l10 15Z"
+                /></svg
+              ><strong>BASTION</strong><small>HEAVY / ENFORCER</small>
+            </button>
+          </div>
+        </section>
+        <section class="craft-stats">
+          <div>
+            <span>TOP SPEED</span><b id="stat-speed">960 <small>KM/H</small></b>
+          </div>
+          <div class="stat-bars">
+            <label>HANDLING</label><i id="handling"></i><label>ARMOR</label
+            ><i id="armor"></i>
+          </div>
+          <p id="craft-desc">Surgical precision. Uncompromising control.</p>
+        </section>
+        <section class="launch">
+          <div class="launch-meta">
+            <span>3 LAPS</span><span>8 PILOTS</span><span>WEAPONS LIVE</span>
+          </div>
+          <button id="start">ENTER THE RACE <span>↗</span></button
+          ><span class="launch-hint">PRESS ENTER TO DEPLOY</span>
+        </section>
+      </div>
+      <footer>
+        <span><i class="live-dot"></i> ALL SYSTEMS ONLINE</span
+        ><span>HEADPHONES RECOMMENDED</span
+        ><span>WEBGL / REAL-TIME 3D <b>© 2186 VRC</b></span>
+      </footer>
+    </main>
+    <section id="hud" class="hidden">
+      <div class="race-top">
+        <div class="position">
+          <span class="micro">POSITION</span><b id="position">08</b
+          ><span>/ 08</span>
+        </div>
+        <div class="lap">
+          <span class="micro">LAP</span
+          ><b><span id="lap">01</span><small> / 03</small></b>
+        </div>
+        <div class="timing">
+          <span class="micro">RACE TIME</span><b id="timer">00:00.000</b
+          ><span id="sector">HALO CIRCUIT / SECTOR 01</span>
+        </div>
+      </div>
+      <div id="race-message"></div>
+      <div class="race-bottom">
+        <div class="systems">
+          <div class="micro">HULL INTEGRITY <b id="shield-val">100%</b></div>
+          <div class="meter hull"><i id="shield-bar"></i></div>
+          <div class="weapon">
+            <span id="weapon-icon">⌖</span>
+            <div>
+              <small>WEAPON SYSTEM</small><b id="weapon-name">PLASMA BOLT</b>
+            </div>
+            <kbd>SPACE</kbd>
+          </div>
+          <canvas id="minimap" width="200" height="130"></canvas>
+        </div>
+        <div class="speedo">
+          <div id="drift-label">AIRBRAKE ENGAGED</div>
+          <b id="speed">000</b><span>KM/H</span>
+          <div class="speed-line"></div>
+          <div class="boost-info">
+            <span>BOOST RESERVE</span
+            ><span><b id="boost-val">100</b>% <kbd>SHIFT</kbd></span>
+          </div>
+          <div class="meter boost"><i id="boost-bar"></i></div>
+        </div>
+      </div>
+      <div class="race-controls">
+        <span><kbd>W A S D</kbd> PILOT</span
+        ><span><kbd>Q / E</kbd> AIRBRAKE</span
+        ><span><kbd>SHIFT</kbd> BOOST</span><span><kbd>SPACE</kbd> FIRE</span
+        ><span><kbd>ESC</kbd> PAUSE</span>
+      </div>
+    </section>
+    <div id="countdown" class="hidden"></div>
+    <div id="overlay" class="hidden">
+      <div class="modal">
+        <span class="eyebrow orange" id="modal-kicker">FLIGHT MANUAL</span>
+        <h2 id="modal-title">TAKE CONTROL.</h2>
+        <div id="controls-content">
+          <div class="control-row"><kbd>W / ↑</kbd><span>Accelerate</span></div>
+          <div class="control-row">
+            <kbd>S / ↓</kbd><span>Brake / decelerate</span>
+          </div>
+          <div class="control-row"><kbd>A D / ← →</kbd><span>Steer</span></div>
+          <div class="control-row">
+            <kbd>Q / E</kbd
+            ><span>Left / right airbrake. Hold into turns to drift.</span>
+          </div>
+          <div class="control-row">
+            <kbd>SHIFT</kbd><span>Boost. Regenerates when released.</span>
+          </div>
+          <div class="control-row">
+            <kbd>SPACE</kbd><span>Fire weapon / activate shield</span>
+          </div>
+          <p>
+            Collect orange weapon cells and cyan shields. Ride the glowing boost
+            pads. Ram rivals, hit the apex, and survive three laps.
+          </p>
+        </div>
+        <div id="results-content" class="hidden"></div>
+        <button id="resume" class="primary">LET'S FLY <span>↗</span></button
+        ><button id="exit" class="text-button hidden">RETURN TO HANGAR</button>
+      </div>
+    </div>
+    <div id="loading">
+      <span class="brand">VOIDRUNNER</span
+      ><span>INITIALIZING FLIGHT SYSTEMS…</span>
+    </div>
+    <div id="touch" class="hidden">
+      <button data-key="KeyA">◀</button><button data-key="KeyD">▶</button
+      ><button data-key="KeyW">THRUST</button
+      ><button data-key="ShiftLeft">BOOST</button
+      ><button data-key="Space">FIRE</button>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,44 @@
+[
+  {
+    "name": "needle",
+    "triangles": 58660,
+    "meshes": 11,
+    "bytes": 2300072,
+    "file": "/Users/kts/dev/projects/agents/models-benchmarks/astra/var3/public/models/needle.glb",
+    "engineX": 1.62,
+    "engineY": -0.1,
+    "engineZ": -2.85,
+    "engineRadius": 0.48,
+    "front": "+Z",
+    "up": "+Y",
+    "units": "meters"
+  },
+  {
+    "name": "wraith",
+    "triangles": 57908,
+    "meshes": 11,
+    "bytes": 2256676,
+    "file": "/Users/kts/dev/projects/agents/models-benchmarks/astra/var3/public/models/wraith.glb",
+    "engineX": 2.08,
+    "engineY": -0.1,
+    "engineZ": -2.85,
+    "engineRadius": 0.65,
+    "front": "+Z",
+    "up": "+Y",
+    "units": "meters"
+  },
+  {
+    "name": "bastion",
+    "triangles": 64792,
+    "meshes": 11,
+    "bytes": 2596892,
+    "file": "/Users/kts/dev/projects/agents/models-benchmarks/astra/var3/public/models/bastion.glb",
+    "engineX": 2.42,
+    "engineY": -0.1,
+    "engineZ": -2.85,
+    "engineRadius": 0.83,
+    "front": "+Z",
+    "up": "+Y",
+    "units": "meters"
+  }
+]

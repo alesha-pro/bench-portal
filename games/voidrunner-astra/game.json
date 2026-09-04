@@ -1,0 +1,8 @@
+{
+  "slug": "voidrunner-astra",
+  "title": "VOIDRUNNER: Orbital Combat League",
+  "version": "ASTRA",
+  "description": "A Three.js anti-gravity combat racer above a fractured ocean world, with three Blender-authored hovercraft, boost and airbrake drifting, rival combat, weapons and shields, elevation drops, custom shaders, PBR materials, bloom, motion blur, and a 360° 3D craft showroom.",
+  "accent": "#ff6338",
+  "tags": ["Game", "Racer", "Three.js", "WebGL", "Shaders", "3D Models", "ASTRA"]
+}
