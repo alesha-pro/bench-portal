@@ -1,0 +1,8 @@
+{
+  "slug": "voidbound-choir-of-ash",
+  "title": "VOIDBOUND: The Choir of Ash",
+  "version": "ASTRA",
+  "description": "A third-person WebGL slasher inside a cathedral built from the bones of a star-eater. Carve through a living horde with chained sword combos, crushing heavy strikes, phase dodges, and reality-tearing void magic.",
+  "accent": "#ee503b",
+  "tags": ["Game", "Action", "Hack-and-slash", "Three.js", "WebGL", "Shaders", "ASTRA"]
+}
