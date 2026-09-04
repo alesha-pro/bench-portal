@@ -1,0 +1,15 @@
+{
+  "slug": "breach-blacksite-astra",
+  "title": "BREACH — Blacksite",
+  "version": "ASTRA",
+  "description": "Modern Three.js horde-survival FPS with three detailed weapons, spring-based weapon inertia, distinct recoil, animated soldiers and directional hit reactions. MK18 uses a 2.4× picture-in-picture red-dot optic with an unzoomed peripheral view; shotgun and marksman rifle use iron sights. Includes sprint, slide, jump, reload and inspection animations, SSAO, bloom and procedural audio.",
+  "accent": "#e3ef85",
+  "tags": [
+    "Game",
+    "FPS",
+    "Three.js",
+    "WebGL",
+    "Astra",
+    "Procedural Audio"
+  ]
+}
