@@ -1,0 +1,15 @@
+{
+  "slug": "rig-3090-astra",
+  "title": "RIG / 3090 — Anatomy of a Rig",
+  "version": "ASTRA",
+  "description": "A cinematic, scroll-driven exploration of a real four-RTX-3090 rig. The original Blender photo reconstruction becomes 22 movable component groups: graphics cards, cooling, motherboard, power supplies and hand-built supports. Scroll to take it apart, explore close-ups and put it back together. Reverse scrolling reverses the animation.",
+  "accent": "#cbff6b",
+  "tags": [
+    "Showcase",
+    "3D",
+    "Three.js",
+    "Blender",
+    "glTF",
+    "ASTRA"
+  ]
+}
