@@ -1,0 +1,17 @@
+{
+  "slug": "rig-3090-fable-5.1",
+  "title": "RIG \u00b7 4\u00d7 RTX 3090",
+  "version": "FABLE 5.1",
+  "description": "Scroll-driven interactive presentation of a real 4\u00d7 RTX 3090 open-air rig. The 3D model was built by Claude Fable 5.1 in Blender from photographs (673 objects: aluminium frame, four triple-fan GPUs with perforated brackets, motherboard with risers, tower cooler, RGB fans, two PSUs, cables and improvised stands), exported to Draco-compressed glTF and staged in Three.js with PBR lighting, shadows and selective bloom. Scrolling explodes the rig into components, flies the camera through close-ups with captions, then reassembles it; scrolling back reverses the animation.",
+  "accent": "#ff2fb0",
+  "tags": [
+    "Showcase",
+    "3D",
+    "Three.js",
+    "GSAP",
+    "Blender",
+    "glTF",
+    "Fable 5.1",
+    "Claude Code"
+  ]
+}

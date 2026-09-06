@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RIG · 4× RTX 3090 — scroll-driven teardown</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;500;700&family=Manrope:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="vignette"></div>
+
+<div id="loader"><div class="ld-title">RIG</div><div class="ld-bar"><i></i></div><div class="ld-pct">0%</div></div>
+
+<header class="top">
+  <div class="brand"><span class="dot"></span>RIG · 3090 ×4</div>
+  <div class="meta">open air frame · 96 GB GDDR6X · Blender → glTF → Three.js</div>
+</header>
+
+<section class="hero ui" id="hero">
+  <h1><span>RIG</span></h1>
+  <p class="sub">Four GeForce RTX 3090s on an open-air frame.<br>Modeled from photographs, part by part.</p>
+  <div class="hint"><span class="line"></span>scroll to take it apart</div>
+</section>
+
+<aside class="cap ui left" id="cap0">
+  <div class="idx">00</div>
+  <h2>Taking it apart</h2>
+  <p>Every part comes from the photos: from the 20×20 aluminium angle and shelf sheets down to the zip ties on the chrome rod. 673 objects in the scene.</p>
+</aside>
+
+<aside class="cap ui right" id="cap1">
+  <div class="idx">01 — graphics</div>
+  <h2>4× RTX 3090</h2>
+  <p>Three fans, 10,496 CUDA cores and 24 GB of GDDR6X on each card. Together, 96 GB of VRAM for large-model inference. Two rest on improvised stands, one stands on its side in the right bay.</p>
+</aside>
+
+<aside class="cap ui left" id="cap2">
+  <div class="idx">02 — board and risers</div>
+  <h2>Six slots, four risers</h2>
+  <p>An ATX board with VGA, USB and Ethernet, turned ports-forward. The cards connect through x1 → x16 USB risers, and the tower cooler with eight heat pipes reaches the top rail.</p>
+</aside>
+
+<aside class="cap ui right" id="cap3">
+  <div class="idx">03 — power and airflow</div>
+  <h2>≈ 2 kW and four RGB fans</h2>
+  <p>Two power supplies: 1200 W inside the frame and a Thermalright 850 W on its side at the back. Four 120 mm fans with RGB rings push air straight through the middle bay.</p>
+</aside>
+
+<aside class="cap ui left" id="cap4">
+  <div class="idx">04 — engineering decisions</div>
+  <h2>A Canon box and an egg carton</h2>
+  <p>The top card sits on an EF 24-70mm f/2.8L lens box, the middle one rests its bracket on an egg carton, the third lies on cardboard. If it works, it is correct.</p>
+</aside>
+
+<section class="final ui" id="final">
+  <h2>Assembled.</h2>
+  <p>Blender · 673 objects · glTF export · Three.js + GSAP ScrollTrigger</p>
+</section>
+
+<div class="progress"><i id="pbar"></i></div>
+<div id="scroller"></div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
