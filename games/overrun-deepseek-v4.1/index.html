@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<link rel="icon" href="data:," />
+<title>OVERRUN</title>
+<style>
+  :root{
+    --amber:#ffb03a;
+    --cyan:#54e8ff;
+    --red:#ff3b30;
+    --ui: 'Bahnschrift','DIN Alternate','Oswald','Roboto Condensed','Arial Narrow',system-ui,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#05070a;}
+  body{
+    font-family:var(--ui);
+    color:#dfe7ee;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    cursor:default;
+    user-select:none;
+  }
+  body.ingame{cursor:none;}
+  #gl{position:fixed;inset:0;display:block;width:100%;height:100%;}
+
+  /* ---------------------------------------------------------------- HUD */
+  #hud{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .35s ease;}
+  #hud.on{opacity:1;}
+
+  #crosshair{position:absolute;left:50%;top:50%;width:0;height:0;}
+  #crosshair i{
+    position:absolute;background:#eaf6ff;display:block;
+    box-shadow:0 0 2px rgba(0,0,0,.95),0 0 1px rgba(0,0,0,1);
+    will-change:transform;
+  }
+  #crosshair .d{width:2px;height:8px;left:-1px;top:-4px;transform-origin:50% 50%;}
+  #crosshair .dot{width:2px;height:2px;left:-1px;top:-1px;opacity:.85;border-radius:50%;}
+  #ch-dot-ring{position:absolute;left:-14px;top:-14px;width:28px;height:28px;
+    border:1.5px solid rgba(234,246,255,.85);border-radius:50%;
+    box-shadow:0 0 3px rgba(0,0,0,.9);
+    transform:scale(.15);opacity:0;transition:none;}
+  #ch-hit{
+    position:absolute;left:-16px;top:-16px;width:32px;height:32px;opacity:0;
+  }
+  #ch-hit svg{width:32px;height:32px;overflow:visible;}
+  #ch-hit path{stroke:#fff;stroke-width:2.6;fill:none;stroke-linecap:round;
+    filter:drop-shadow(0 0 2px rgba(0,0,0,.9));}
+
+  /* hitmarker x */
+  #hitmark{position:absolute;left:-13px;top:-13px;width:26px;height:26px;opacity:0;}
+  #hitmark path{stroke:#fff;stroke-width:2.4;fill:none;stroke-linecap:round;
+    filter:drop-shadow(0 0 2.5px rgba(0,0,0,.95));}
+  #hitmark.head path{stroke:#ff4646;stroke-width:3;}
+
+  .dmg-num{
+    position:absolute;font-family:var(--ui);font-weight:700;font-size:19px;
+    color:#fff;text-shadow:0 0 4px rgba(0,0,0,.9),0 1px 2px #000;
+    letter-spacing:.02em;will-change:transform,opacity;white-space:nowrap;
+  }
+  .dmg-num.crit{color:#ffd34d;font-size:23px;}
+
+  /* ------------------------------------------------------------ ammo/health */
+  #bottom-right{
+    position:absolute;right:46px;bottom:38px;text-align:right;
+    text-shadow:0 2px 10px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,1);
+  }
+  #wp-name{
+    font-size:13px;letter-spacing:.34em;text-transform:uppercase;
+    color:#9fb2c4;margin-bottom:6px;font-weight:600;
+  }
+  #ammo-line{display:flex;align-items:flex-end;justify-content:flex-end;gap:10px;line-height:1;}
+  #ammo-mag{font-size:62px;font-weight:700;letter-spacing:-.01em;color:#fff;
+    font-variant-numeric:tabular-nums;min-width:1.6ch;text-align:right;}
+  #ammo-res{font-size:27px;font-weight:600;color:#8fa0b2;padding-bottom:7px;
+    font-variant-numeric:tabular-nums;}
+  #ammo-mag.low{color:#ff5b4a;}
+  #ammo-mag.empty{color:#ff2d1e;}
+  #reload-bar{
+    margin-top:9px;margin-left:auto;width:172px;height:3px;background:rgba(255,255,255,.14);
+    overflow:hidden;position:relative;opacity:0;transition:opacity .12s;
+  }
+  #reload-bar.on{opacity:1;}
+  #reload-fill{height:100%;width:0%;background:var(--amber);
+    box-shadow:0 0 8px rgba(255,176,58,.9);}
+  #reload-txt{
+    font-size:10.5px;letter-spacing:.3em;color:var(--amber);margin-top:5px;
+    text-align:right;height:12px;font-weight:600;
+  }
+
+  #bottom-left{position:absolute;left:46px;bottom:38px;}
+  #health-bar{
+    width:250px;height:5px;background:rgba(255,255,255,.12);position:relative;overflow:hidden;
+    box-shadow:0 0 0 1px rgba(0,0,0,.5);
+  }
+  #health-fill{height:100%;width:100%;background:linear-gradient(90deg,#63d6ff,#b6f0ff);
+    transition:width .18s cubic-bezier(.2,.7,.3,1),background .3s;}
+  #health-bar.low #health-fill{background:linear-gradient(90deg,#ff2d1e,#ff7a3d);}
+  #health-num{
+    font-size:36px;font-weight:700;color:#eaf6ff;line-height:1;margin-bottom:7px;
+    font-variant-numeric:tabular-nums;text-shadow:0 2px 10px rgba(0,0,0,.8);
+  }
+  #health-num.low{color:#ff5b4a;}
+  #health-label{font-size:10px;letter-spacing:.34em;color:#7d90a4;margin-bottom:9px;font-weight:600;}
+  #armor-row{display:flex;align-items:center;gap:7px;margin-top:10px;}
+  #armor-row span{font-size:10px;letter-spacing:.3em;color:#7d90a4;font-weight:600;}
+  #armor-pips{display:flex;gap:3px;}
+  #armor-pips i{width:19px;height:4px;background:rgba(255,255,255,.13);display:block;
+    transition:background .2s,box-shadow .2s;}
+  #armor-pips i.on{background:#54e8ff;box-shadow:0 0 6px rgba(84,232,255,.8);}
+
+  /* ------------------------------------------------------------- top-center */
+  #top-center{position:absolute;left:50%;top:20px;transform:translateX(-50%);
+    display:flex;gap:9px;align-items:center;}
+  .obj{
+    display:flex;align-items:center;gap:8px;padding:7px 13px;
+    background:rgba(8,12,18,.55);border:1px solid rgba(255,255,255,.09);
+    backdrop-filter:blur(7px);font-size:11.5px;letter-spacing:.2em;font-weight:600;
+    text-transform:uppercase;
+  }
+  .obj b{color:#fff;font-variant-numeric:tabular-nums;font-size:14px;letter-spacing:0;}
+  .obj .lbl{color:#8ea1b4;}
+  .obj.hostile .lbl{color:#ff7a6e;}
+
+  /* --------------------------------------------------------------- killfeed */
+  #killfeed{position:absolute;right:44px;top:64px;display:flex;flex-direction:column;
+    align-items:flex-end;gap:5px;}
+  .kf{
+    display:flex;align-items:center;gap:9px;padding:5px 11px;font-size:12px;
+    background:rgba(8,12,18,.6);border-right:2px solid var(--amber);
+    letter-spacing:.09em;font-weight:600;text-transform:uppercase;
+    animation:kfin .18s ease-out;
+  }
+  .kf.out{animation:kfout .3s ease forwards;}
+  @keyframes kfin{from{opacity:0;transform:translateX(18px);}to{opacity:1;transform:none;}}
+  @keyframes kfout{to{opacity:0;transform:translateX(14px);}}
+  .kf .who{color:#fff;}
+  .kf .how{color:#ffb03a;font-size:11px;}
+  .kf .hs{color:#ff4646;font-size:10px;letter-spacing:.16em;}
+
+  /* ------------------------------------------------------------- wave banner */
+  #banner{
+    position:absolute;left:0;right:0;top:31%;text-align:center;opacity:0;
+  }
+  #banner .b1{font-size:12px;letter-spacing:.72em;color:var(--amber);font-weight:600;
+    text-indent:.72em;margin-bottom:12px;}
+  #banner .b2{font-size:56px;font-weight:700;letter-spacing:.2em;color:#fff;
+    text-indent:.2em;text-shadow:0 4px 30px rgba(0,0,0,.9);}
+  #banner .b3{font-size:13px;letter-spacing:.36em;color:#9fb2c4;margin-top:12px;
+    text-indent:.36em;font-weight:600;}
+  #banner.in{animation:ban 2.6s ease-out forwards;}
+  @keyframes ban{
+    0%{opacity:0;transform:translateY(16px) scale(.985);}
+    12%{opacity:1;transform:none;}
+    76%{opacity:1;transform:none;}
+    100%{opacity:0;transform:translateY(-10px);}
+  }
+
+  /* ----------------------------------------------------------- dmg indicators */
+  #dmg-dirs{position:absolute;inset:0;}
+  .dmg-arc{
+    position:absolute;left:50%;top:50%;width:220px;height:220px;margin:-110px 0 0 -110px;
+    opacity:0;
+  }
+  .dmg-arc svg{width:100%;height:100%;}
+  .dmg-arc path{fill:none;stroke:#ff3b30;stroke-width:9;stroke-linecap:round;
+    filter:drop-shadow(0 0 6px rgba(255,40,20,.75));}
+
+  /* ------------------------------------------------------------------ menu */
+  #menu{
+    position:fixed;inset:0;background:radial-gradient(circle at 50% 44%,rgba(9,15,23,.62) 0%,rgba(5,7,10,.93) 62%,rgba(5,7,10,.985) 100%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;
+    z-index:30;
+  }
+  #menu.hidden{display:none;}
+  #menu-bg{position:absolute;inset:0;overflow:hidden;opacity:.5;pointer-events:none;}
+  #menu-bg .streak{
+    position:absolute;left:0;right:0;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(84,232,255,.5),transparent);
+    animation:scan 7s linear infinite;
+  }
+  @keyframes scan{from{transform:translateY(-10vh);}to{transform:translateY(110vh);}}
+  #menu-inner{position:relative;text-align:center;max-width:900px;padding:20px;}
+  #logo{
+    font-size:96px;font-weight:700;letter-spacing:.2em;text-indent:.2em;line-height:.95;
+    color:#fff;margin-bottom:6px;
+    text-shadow:0 0 40px rgba(84,232,255,.28),0 0 90px rgba(84,232,255,.12);
+  }
+  #logo em{font-style:normal;color:var(--amber);text-shadow:0 0 40px rgba(255,176,58,.5);}
+  #tagline{font-size:13px;letter-spacing:.62em;color:#7d90a4;text-indent:.62em;
+    margin-bottom:44px;font-weight:600;}
+  #loadout{display:flex;gap:14px;justify-content:center;margin-bottom:34px;}
+  .wcard{
+    width:186px;padding:15px 15px 17px;background:rgba(12,18,26,.72);
+    border:1px solid rgba(255,255,255,.09);text-align:left;cursor:pointer;
+    transition:border-color .16s,background .16s,transform .16s;
+    position:relative;overflow:hidden;
+  }
+  .wcard:hover{background:rgba(20,30,42,.85);border-color:rgba(255,255,255,.2);
+    transform:translateY(-2px);}
+  .wcard.sel{border-color:var(--amber);background:rgba(30,22,10,.72);}
+  .wcard.sel::after{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--amber);}
+  .wcard .k{font-size:9.5px;letter-spacing:.3em;color:#7d90a4;font-weight:600;margin-bottom:7px;}
+  .wcard .n{font-size:16px;font-weight:700;color:#fff;letter-spacing:.05em;margin-bottom:9px;}
+  .wcard .s{display:flex;justify-content:space-between;font-size:10.5px;color:#93a6b8;
+    letter-spacing:.09em;margin-top:3px;}
+  .wcard .s b{color:#c9d8e6;font-variant-numeric:tabular-nums;}
+  .wcard .bar{height:2px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden;}
+  .wcard .bar i{display:block;height:100%;background:var(--cyan);}
+  .wcard.sel .bar i{background:var(--amber);}
+  #play{
+    pointer-events:auto;padding:16px 58px;background:var(--amber);color:#0a0a0a;
+    border:none;font-family:var(--ui);font-size:15px;font-weight:700;letter-spacing:.34em;
+    text-indent:.34em;cursor:pointer;text-transform:uppercase;
+    transition:background .15s,transform .1s,box-shadow .15s;
+    box-shadow:0 0 0 rgba(255,176,58,0);
+  }
+  #play:hover{background:#ffc463;box-shadow:0 0 34px rgba(255,176,58,.42);}
+  #play:active{transform:scale(.985);}
+  #controls{
+    margin-top:38px;display:grid;grid-template-columns:repeat(4,auto);gap:9px 26px;
+    font-size:11px;letter-spacing:.14em;color:#7d90a4;font-weight:600;
+  }
+  #controls div span{color:#c9d8e6;background:rgba(255,255,255,.08);padding:2px 6px;
+    margin-right:7px;font-size:10px;}
+  #hint{position:absolute;bottom:26px;left:0;right:0;text-align:center;font-size:11px;
+    letter-spacing:.3em;color:#4d5c6b;font-weight:600;}
+
+  /* --------------------------------------------------------------- pause */
+  #pause{
+    position:fixed;inset:0;background:rgba(4,6,9,.82);backdrop-filter:blur(10px);
+    display:none;flex-direction:column;align-items:center;justify-content:center;gap:22px;
+    z-index:25;
+  }
+  #pause.on{display:flex;}
+  #pause h2{font-size:34px;letter-spacing:.44em;text-indent:.44em;color:#fff;font-weight:700;}
+  .pbtn{padding:13px 44px;background:transparent;border:1px solid rgba(255,255,255,.22);
+    color:#dfe7ee;font-family:var(--ui);font-size:12.5px;letter-spacing:.3em;text-indent:.3em;
+    cursor:pointer;font-weight:600;text-transform:uppercase;min-width:280px;
+    transition:background .14s,border-color .14s,color .14s;}
+  .pbtn:hover{background:rgba(255,255,255,.09);border-color:#fff;color:#fff;}
+  .pbtn small{display:block;font-size:9px;letter-spacing:.2em;color:#6d7f91;margin-top:5px;}
+  #pause-stats{display:flex;gap:34px;margin:6px 0 10px;}
+  #pause-stats div{text-align:center;}
+  #pause-stats b{display:block;font-size:27px;color:#fff;font-variant-numeric:tabular-nums;}
+  #pause-stats span{font-size:9.5px;letter-spacing:.28em;color:#7d90a4;font-weight:600;}
+
+  /* ---------------------------------------------------------------- death */
+  #death{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    flex-direction:column;z-index:28;background:rgba(30,0,0,.35);
+    backdrop-filter:blur(2px) saturate(.35);
+  }
+  #death.on{display:flex;animation:dfin .7s ease-out;}
+  @keyframes dfin{from{opacity:0;}to{opacity:1;}}
+  #death h1{font-size:60px;letter-spacing:.28em;text-indent:.28em;color:#ff3b30;
+    font-weight:700;text-shadow:0 0 46px rgba(255,40,20,.5);}
+  #death .sub{font-size:13px;letter-spacing:.42em;color:#c9a0a0;margin-top:14px;font-weight:600;}
+  #death .stats{display:flex;gap:44px;margin:38px 0 34px;}
+  #death .stats div{text-align:center;}
+  #death .stats b{display:block;font-size:38px;color:#fff;font-variant-numeric:tabular-nums;}
+  #death .stats span{font-size:10px;letter-spacing:.28em;color:#8a7c7c;font-weight:600;}
+
+  /* ------------------------------------------------------------ diagnostics */
+  #diag{
+    position:fixed;left:12px;top:12px;z-index:35;display:none;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;
+    line-height:1.5;color:#cfe3f2;background:rgba(6,10,16,.82);
+    border:1px solid rgba(255,255,255,.12);border-left:2px solid var(--cyan);
+    padding:9px 13px;min-width:330px;pointer-events:none;white-space:pre;
+  }
+  #diag.on{display:block;}
+  #diag .row{display:flex;gap:10px;}
+  #diag .row b{color:#6f8698;font-weight:600;min-width:66px;display:inline-block;}
+  #diag .row span{color:#eaf6ff;}
+
+  #fatal{
+    position:fixed;inset:0;z-index:50;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:16px;padding:40px;
+    background:rgba(6,4,4,.94);backdrop-filter:blur(6px);text-align:center;
+  }
+  #fatal.on{display:flex;}
+  #fatal h2{font-size:26px;letter-spacing:.24em;color:#ff6b5b;font-weight:700;text-transform:uppercase;}
+  #fatal .sub{font-size:12px;letter-spacing:.16em;color:#9fb2c4;font-weight:600;}
+  #fatal .sub.small{font-size:10.5px;color:#5d6f80;}
+  #fatal pre{
+    max-width:min(920px,92vw);max-height:38vh;overflow:auto;text-align:left;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+    line-height:1.55;color:#ffd9d2;background:rgba(0,0,0,.42);
+    border:1px solid rgba(255,107,91,.28);padding:14px 16px;white-space:pre-wrap;
+  }
+  #fatal .btns{display:flex;gap:12px;}
+
+  /* --------------------------------------------------------------- loading */
+  #loading{position:fixed;inset:0;background:#05070a;display:flex;align-items:center;
+    justify-content:center;flex-direction:column;z-index:40;gap:18px;}
+  #loading.off{display:none;}
+  #loading .t{font-size:12px;letter-spacing:.44em;color:#7d90a4;font-weight:600;
+    text-indent:.44em;}
+  #loading .bar{width:280px;height:2px;background:rgba(255,255,255,.1);overflow:hidden;}
+  #loading .bar i{display:block;height:100%;width:0%;background:var(--amber);transition:width .2s;}
+  #loading .err{max-width:640px;font-size:12px;color:#ff6b5b;font-family:monospace;
+    text-align:left;white-space:pre-wrap;line-height:1.5;}
+</style>
+  <script type="module" crossorigin src="./assets/index-Bywc_K_8.js"></script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <div id="hud">
+    <div id="dmg-dirs"></div>
+
+    <div id="crosshair">
+      <i class="d" id="ch-t"></i><i class="d" id="ch-b"></i>
+      <i class="d" id="ch-l"></i><i class="d" id="ch-r"></i>
+      <i class="dot" id="ch-c"></i>
+      <div id="ch-dot-ring"></div>
+      <svg id="ch-hit" viewBox="0 0 32 32"><path d="M16 6 L16 12 M16 20 L16 26 M6 16 L12 16 M20 16 L26 16"/></svg>
+      <svg id="hitmark" viewBox="0 0 26 26">
+        <path d="M8 8 L12 12 M18 8 L14 12 M8 18 L12 14 M18 18 L14 14"/>
+      </svg>
+    </div>
+
+    <div id="top-center">
+      <div class="obj hostile"><span class="lbl">Hostiles</span><b id="obj-enemies">0</b></div>
+      <div class="obj"><span class="lbl">Wave</span><b id="obj-wave">1</b></div>
+      <div class="obj"><span class="lbl">Score</span><b id="obj-score">0</b></div>
+    </div>
+
+    <div id="killfeed"></div>
+
+    <div id="bottom-right">
+      <div id="wp-name">—</div>
+      <div id="ammo-line">
+        <div id="ammo-mag">30</div>
+        <div id="ammo-res">/ 240</div>
+      </div>
+      <div id="reload-bar"><div id="reload-fill"></div></div>
+      <div id="reload-txt"></div>
+    </div>
+
+    <div id="bottom-left">
+      <div id="health-label">Integrity</div>
+      <div id="health-num">100</div>
+      <div id="health-bar"><div id="health-fill"></div></div>
+      <div id="armor-row">
+        <span>Plate</span>
+        <div id="armor-pips"><i></i><i></i><i></i></div>
+      </div>
+    </div>
+
+    <div id="banner">
+      <div class="b1" id="ban-1"></div>
+      <div class="b2" id="ban-2"></div>
+      <div class="b3" id="ban-3"></div>
+    </div>
+  </div>
+
+  <div id="menu">
+    <div id="menu-bg"></div>
+    <div id="menu-inner">
+      <div id="logo">OVER<em>RUN</em></div>
+      <div id="tagline">Sector 7 — Containment Failed</div>
+      <div id="loadout"></div>
+      <button id="play">Deploy</button>
+      <div id="controls">
+        <div><span>WASD</span>Move</div>
+        <div><span>MOUSE</span>Aim</div>
+        <div><span>LMB</span>Fire</div>
+        <div><span>RMB</span>Aim Down Sight</div>
+        <div><span>SHIFT</span>Sprint</div>
+        <div><span>CTRL/C</span>Crouch</div>
+        <div><span>SPACE</span>Jump</div>
+        <div><span>R</span>Reload</div>
+        <div><span>1 2 3</span>Weapons</div>
+        <div><span>Q</span>Quick Swap</div>
+        <div><span>F</span>Melee</div>
+        <div><span>ESC</span>Pause</div>
+      </div>
+    </div>
+    <div id="hint">Headphones recommended · Click to lock mouse</div>
+  </div>
+
+  <div id="pause">
+    <h2>Paused</h2>
+    <div id="pause-stats">
+      <div><b id="ps-kills">0</b><span>Kills</span></div>
+      <div><b id="ps-acc">0%</b><span>Accuracy</span></div>
+      <div><b id="ps-wave">1</b><span>Wave</span></div>
+      <div><b id="ps-score">0</b><span>Score</span></div>
+    </div>
+    <button class="pbtn" id="btn-resume">Resume</button>
+    <button class="pbtn" id="btn-sens">Sensitivity <small id="sens-val">1.00</small></button>
+    <button class="pbtn" id="btn-menu">Abandon Run</button>
+  </div>
+
+  <div id="death">
+    <h1>K.I.A.</h1>
+    <div class="sub">Sector overrun</div>
+    <div class="stats">
+      <div><b id="d-kills">0</b><span>Kills</span></div>
+      <div><b id="d-acc">0%</b><span>Accuracy</span></div>
+      <div><b id="d-wave">1</b><span>Wave Reached</span></div>
+      <div><b id="d-score">0</b><span>Score</span></div>
+      <div><b id="d-hs">0</b><span>Headshots</span></div>
+    </div>
+    <button class="pbtn" id="btn-retry">Redeploy</button>
+  </div>
+
+  <div id="diag">
+    <div class="row"><b>GPU</b><span id="dg-gpu">—</span></div>
+    <div class="row"><b>Target</b><span id="dg-mode">—</span></div>
+    <div class="row"><b>Canvas</b><span id="dg-canvas">—</span></div>
+    <div class="row"><b>Frame</b><span id="dg-frame">—</span></div>
+    <div class="row"><b>Scene</b><span id="dg-scene">—</span></div>
+    <div class="row"><b>World</b><span id="dg-world">—</span></div>
+    <div class="row"><b>State</b><span id="dg-state">—</span></div>
+  </div>
+
+  <div id="fatal">
+    <h2 id="fatal-title">Rendering stopped</h2>
+    <div class="sub" id="fatal-sub">The renderer hit a problem it could not recover from.</div>
+    <pre id="fatal-msg"></pre>
+    <div class="btns">
+      <button class="pbtn" id="fatal-safe">Reload in safe mode</button>
+      <button class="pbtn" id="fatal-reload">Reload</button>
+    </div>
+    <div class="sub small">Press F1 in game for the diagnostics overlay.</div>
+  </div>
+
+  <div id="loading">
+    <div class="t">Loading</div>
+    <div class="bar"><i id="load-fill"></i></div>
+    <div class="err" id="load-err"></div>
+  </div>
+
+</body>
+</html>
