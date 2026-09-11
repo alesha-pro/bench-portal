@@ -1,0 +1,16 @@
+{
+  "slug": "gpt-6-astra-2026-09-11",
+  "title": "GPT-6 Astra 11.09.2026",
+  "version": "ZERO MERCY",
+  "description": "Modern Three.js arena-survival FPS: three weapons with distinct recoil and weapon inertia, red-dot ADS on the MK18 and iron sights on the shotgun and M14. Escalating hordes, headshots, sprint-slide movement, grenades, explosive barrels, ammo drops, custom shaders and procedural audio.",
+  "accent": "#ff703e",
+  "tags": [
+    "Game",
+    "FPS",
+    "Three.js",
+    "WebGL",
+    "GLSL",
+    "GPT-6 Astra",
+    "Procedural Audio"
+  ]
+}
