@@ -13,5 +13,7 @@
     "AC-130",
     "GLM-5.3 Flash",
     "omp"
-  ]
+  ],
+  "category": "action-sandbox",
+  "model": "GLM-5.3 Flash"
 }

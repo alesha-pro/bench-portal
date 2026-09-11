@@ -4,5 +4,14 @@
   "version": "alpha",
   "description": "12 032 experts of a 117B MoE as a living star field, built from a real router profile: 3 205 231 tokens captured live in vLLM on 4x RTX 3090, plus a real per-token route trace from the same checkpoint. Watch a token climb 47 sparse layers picking its top 10 experts at each one, see which experts burn and which 64 are nearly dead, and check every number on screen against the raw files with the built-in self-test. Press T to run it, M to switch aggregate and live modes, WASD to fly.",
   "accent": "#ffb14e",
-  "tags": ["Three.js", "WebGL", "MoE", "Routing", "Dataviz", "Laguna S 2.1"]
+  "tags": [
+    "Three.js",
+    "WebGL",
+    "MoE",
+    "Routing",
+    "Dataviz",
+    "Laguna S 2.1"
+  ],
+  "category": "data",
+  "model": null
 }

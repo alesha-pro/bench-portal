@@ -4,5 +4,14 @@
   "version": "QWEN3.8-FLASH-NEXT",
   "description": "A procedural Three.js FPS benchmark built by Qwen3.8-Flash-Next from a single prompt in omp: volumetric light, godrays and motes over a rooftop skyline, spring recoil with red-dot ADS, ragdoll flinch and wave survival. Being a vision model, it took its own screenshots mid-run and graded the frames itself.",
   "accent": "#ffb347",
-  "tags": ["FPS", "Three.js", "WebGL", "Qwen3.8-Flash-Next", "One-shot", "omp"]
+  "tags": [
+    "FPS",
+    "Three.js",
+    "WebGL",
+    "Qwen3.8-Flash-Next",
+    "One-shot",
+    "omp"
+  ],
+  "category": "shooters",
+  "model": "Qwen3.8-Flash-Next"
 }

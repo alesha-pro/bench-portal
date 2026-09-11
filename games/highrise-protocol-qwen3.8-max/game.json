@@ -4,5 +4,12 @@
   "version": "QWEN3.8-MAX",
   "description": "A procedural Three.js FPS benchmark built by Qwen3.8-Max, focused on responsive combat, weapon handling and escalating enemy waves.",
   "accent": "#46d7ff",
-  "tags": ["FPS", "Three.js", "WebGL", "Qwen3.8-Max"]
+  "tags": [
+    "FPS",
+    "Three.js",
+    "WebGL",
+    "Qwen3.8-Max"
+  ],
+  "category": "shooters",
+  "model": "Qwen3.8-Max"
 }

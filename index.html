@@ -4,9 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#07090d" />
-    <meta name="description" content="Playable browser game benchmarks." />
+    <meta
+      name="description"
+      content="A catalog of AI-built games, interactive worlds and visual experiments."
+    />
     <title>Bench Portal</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%2307090d'/%3E%3Crect x='7' y='7' width='50' height='50' rx='3' fill='none' stroke='%23ff5a32' stroke-width='3'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-weight='700' font-size='20' fill='%23ff5a32'%3EBP%3C/text%3E%3C/svg%3E" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%2307090d'/%3E%3Crect x='7' y='7' width='50' height='50' rx='3' fill='none' stroke='%23ff5a32' stroke-width='3'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-weight='700' font-size='20' fill='%23ff5a32'%3EBP%3C/text%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -16,28 +22,116 @@
         <span class="brand-mark">BP</span>
         <span>BENCH PORTAL</span>
       </a>
-      <div class="status"><i></i><span id="game-count">LOADING BUILDS</span></div>
+      <div class="status">
+        <i></i><span id="game-count">LOADING BUILDS</span>
+      </div>
     </header>
 
     <main>
       <section class="hero">
-        <p class="eyebrow">BROWSER PLAYGROUND / LIVE BUILDS</p>
-        <h1>Choose a<br /><em>benchmark.</em></h1>
-        <p class="intro">Playable experiments built to test game feel, rendering, animation and autonomous development.</p>
+        <div>
+          <p class="eyebrow">THE AI BUILD COLLECTION</p>
+          <h1>Explore the <em>builds.</em></h1>
+          <p class="intro">
+            Games, interactive worlds and visual experiments.<br />Built by
+            different models. Open a project and try it yourself.
+          </p>
+        </div>
+        <div class="collection-stats" aria-label="Collection overview">
+          <div>
+            <strong id="total-builds">—</strong><span>live builds</span>
+          </div>
+          <div><strong id="total-models">—</strong><span>models</span></div>
+          <div>
+            <strong id="total-sections">—</strong><span>collections</span>
+          </div>
+        </div>
       </section>
 
-      <section class="library" aria-labelledby="library-title">
-        <div class="section-heading">
-          <h2 id="library-title">Available games</h2>
-          <span>SELECT TO LAUNCH</span>
+      <section class="library" aria-labelledby="library-title" id="library">
+        <div class="library-top">
+          <h2 id="library-title">Browse the collection</h2>
+          <span>FIND YOUR NEXT EXPERIMENT</span>
         </div>
-        <div id="game-grid" class="game-grid" aria-live="polite"></div>
+        <div class="browse-controls" id="browse-controls">
+          <form id="filters" role="search" aria-label="Filter builds">
+            <div class="search-field">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="m16 16 5 5" />
+              </svg>
+              <label class="sr-only" for="search">Search builds</label>
+              <input
+                type="search"
+                id="search"
+                placeholder="Search builds, models, tags…"
+                maxlength="200"
+                autocomplete="off"
+                disabled
+              />
+              <button
+                type="button"
+                id="clear-search"
+                aria-label="Clear search"
+                hidden
+              >
+                ×
+              </button>
+              <kbd aria-hidden="true">/</kbd>
+            </div>
+            <label class="select-field"
+              ><span>MODEL</span
+              ><select id="model" aria-label="Model" disabled>
+                <option value="">All models</option>
+              </select></label
+            >
+            <label class="select-field"
+              ><span>TAG</span
+              ><select id="tag" aria-label="Tag" disabled>
+                <option value="">All tags</option>
+              </select></label
+            >
+            <label class="select-field sort-field"
+              ><span>SORT</span
+              ><select id="sort" aria-label="Sort builds" disabled>
+                <option value="name">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+                <option value="model">Model</option>
+              </select></label
+            >
+          </form>
+          <nav
+            id="categories"
+            class="category-nav"
+            aria-label="Build categories"
+          ></nav>
+        </div>
+        <div class="results-row">
+          <p id="results-status" role="status" aria-live="polite">
+            Loading the collection…
+          </p>
+          <button id="reset" class="text-button" type="button" hidden>
+            Reset filters <span aria-hidden="true">↺</span>
+          </button>
+        </div>
+        <div id="game-grid" aria-busy="true">
+          <div class="loading-card">Getting the builds ready…</div>
+        </div>
+        <noscript
+          ><p class="empty-state">
+            Enable JavaScript to browse and filter the collection.
+          </p></noscript
+        >
       </section>
     </main>
 
     <footer>
       <span>WEBGL / DESKTOP RECOMMENDED</span>
-      <span>BENCH PORTAL © 2026</span>
+      <div class="footer-links">
+        <a href="https://x.com/superalesha">@superalesha ↗</a
+        ><a href="https://github.com/alesha-pro/bench-portal">GitHub ↗</a
+        ><span>BENCH PORTAL © 2026</span>
+      </div>
     </footer>
 
     <script type="module" src="./src/catalog.js"></script>

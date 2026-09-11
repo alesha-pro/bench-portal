@@ -11,5 +11,7 @@
     "Blender",
     "glTF",
     "ASTRA"
-  ]
+  ],
+  "category": "showcases",
+  "model": "GPT-6 Astra"
 }

@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "serve": "python3 -m http.server 4176 --directory dist",
-    "deploy:cloudflare": "npm run build && npx wrangler@4 pages deploy dist --project-name bench-portal --branch main"
+    "deploy:cloudflare": "npm run build && npx wrangler@4 pages deploy dist --project-name bench-portal --branch main",
+    "test": "node --test tests/*.test.mjs"
   }
 }

@@ -4,5 +4,15 @@
   "version": "FABLE 5.1",
   "description": "Call of Duty-style arena FPS in the browser, built one-shot by Claude Fable 5.1 in Claude Code with zero external assets. Three weapons with distinct gunplay (VK-7 full-auto with a parallax-free red dot, Hammer-12 pump shotgun, Longshot DMR with iron sights), spring-based weapon inertia and sway, CoD-style recoil patterns, ADS, sprint and slide. Separate viewmodel render pass, HDR MSAA pipeline with 13-tap bloom, chromatic aberration, radial blur and ACES grading. Hordes rendered as instanced procedural rigs with hit-flash and dissolve shaders, GPU-analytic particles, tracers, decals, shell casings, and fully synthesized WebAudio gunshots and music.",
   "accent": "#5ef2ff",
-  "tags": ["Game", "FPS", "Three.js", "GLSL", "Fable 5.1", "Claude Code", "Procedural Audio"]
+  "tags": [
+    "Game",
+    "FPS",
+    "Three.js",
+    "GLSL",
+    "Fable 5.1",
+    "Claude Code",
+    "Procedural Audio"
+  ],
+  "category": "shooters",
+  "model": "Claude Fable 5.1"
 }

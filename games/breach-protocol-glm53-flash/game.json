@@ -4,5 +4,14 @@
   "version": "GLM-5.3-FLASH",
   "description": "Browser FPS with real gun feel: three weapons with distinct recoil (M4, M9, M870 pump), front-sight ADS, TEMPO DRIVE bullet-time on Q, HDR bloom pipeline, destructible-feeling dusk city with strafing AI. Attract mode plays itself until you click. Generated and iteratively tuned by GLM-5.3 Flash via omp over 7 rounds.",
   "accent": "#ff5a3c",
-  "tags": ["Game", "FPS", "Three.js", "GLM-5.3 Flash", "omp", "WOW-factory"]
+  "tags": [
+    "Game",
+    "FPS",
+    "Three.js",
+    "GLM-5.3 Flash",
+    "omp",
+    "WOW-factory"
+  ],
+  "category": "shooters",
+  "model": "GLM-5.3 Flash"
 }

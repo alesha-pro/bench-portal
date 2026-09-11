@@ -4,5 +4,15 @@
   "version": "DEEPSEEK V4.1",
   "description": "A horde-survival arena FPS built in Three.js with no external assets: every texture, weapon, enemy rig and sound is generated in code. A 120x120 m industrial arena merged into ~100 draw calls, three weapon classes with red-dot and iron sights, patterned learnable recoil, hitscan ballistics with material penetration and per-part damage, and instanced procedural hordes with analytic hit spheres. Hand-rolled HDR pipeline: MSAA scene target, 13-tap down / tent-up bloom chain, and a single composite pass doing ACES, CAS sharpen, radial blur, chromatic aberration, anamorphic streak and damage grading. Lights are streamed through a fixed-size pool and resolution scales dynamically to hold 60 fps.",
   "accent": "#ffb160",
-  "tags": ["Game", "FPS", "Three.js", "WebGL", "GLSL", "DeepSeek V4.1", "Procedural Audio"]
+  "tags": [
+    "Game",
+    "FPS",
+    "Three.js",
+    "WebGL",
+    "GLSL",
+    "DeepSeek V4.1",
+    "Procedural Audio"
+  ],
+  "category": "shooters",
+  "model": "DeepSeek V4.1"
 }

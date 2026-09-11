@@ -1,30 +1,32 @@
 # Bench Portal
 
-Static catalog for playable browser-game benchmarks.
+A static catalog of AI-built games, 3D showcases, shader experiments and data visualizations. Browse by category, search the collection, filter by builder model or tag, and share a filtered URL.
 
-- Cloudflare Pages: <https://bench-portal.pages.dev>
-- GitHub Pages: <https://alesha-pro.github.io/bench-portal/>
+- [Cloudflare Pages](https://bench-portal.pages.dev)
+- [GitHub Pages mirror](https://alesha-pro.github.io/bench-portal/)
 
-## Local preview
+## Local development
 
-```bash
+```sh
+npm test
 npm run build
 npm run serve
 ```
 
-Open <http://127.0.0.1:4176>.
+Open http://127.0.0.1:4176. Rebuild after source changes. The catalog needs no npm packages; use Node 22 and Python 3.
 
-## Add a game
+## Add a project
 
-1. Create `games/<slug>/` with a self-contained `index.html` and relative asset paths.
-2. Add `games/<slug>/game.json`.
-3. Run `npm run build` to validate the manifest and regenerate the catalog.
+Put a self-contained static build and `game.json` in `games/<slug>/`. Use relative asset URLs. The manifest's `category` determines its section; `model` identifies its builder, while `version` remains a build label. Use `model: null` when authorship is unknown.
 
-Cloudflare Pages settings:
+See [AGENTS.md](AGENTS.md) for the manifest schema, category list, preview checks and deployment guide. Category/model/tag filters are generated from the collection, so there is no homepage list to maintain.
 
-- Build command: `npm run build`
-- Build output directory: `dist`
-- Node.js version: `22`
+## Deploy
 
-Cloudflare is connected to the GitHub `main` branch and deploys automatically.
-For a manual fallback deployment, run `npm run deploy:cloudflare`.
+Pushes to `main` trigger the GitHub Pages workflow and the configured Cloudflare integration. For an explicit Wrangler deployment:
+
+```sh
+npm run deploy:cloudflare
+```
+
+Cloudflare project: `bench-portal`. Build command: `npm run build`. Output directory: `dist`. The generated directory is not committed.

@@ -4,5 +4,15 @@
   "version": "GLM-5.3",
   "description": "A spinning black hole rendered in real time from hand-written GLSL — no engine, no library, no npm package in the shipped page. GLM-5.3 built it agentically in Claude Code over 15 hours and 749 tool calls: null geodesics integrated per pixel in Kerr spacetime, an accretion disk coloured from the Planck curve with Doppler beaming, a volumetric jet, and a lensed sky. Being a non-vision model, it judged every frame through an outside vision model, and wrote a ten-check self-test that measures the physics from the pixels — shadow radius against 3√3 M, frame dragging, ISCO tracking, lensing against a numpy ground truth. Press T to run it.",
   "accent": "#ff7a2f",
-  "tags": ["WebGL2", "GLSL", "Raymarching", "Physics", "GLM-5.3", "Agentic", "Claude Code"]
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "Physics",
+    "GLM-5.3",
+    "Agentic",
+    "Claude Code"
+  ],
+  "category": "visuals",
+  "model": "GLM-5.3"
 }

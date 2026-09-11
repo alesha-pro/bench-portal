@@ -11,5 +11,7 @@
     "WebGL",
     "Astra",
     "Procedural Audio"
-  ]
+  ],
+  "category": "shooters",
+  "model": "GPT-6 Astra"
 }

@@ -4,5 +4,14 @@
   "version": "QWEN3.8-27B INT8",
   "description": "A single-file voxel sandbox on raw WebGL, built by Qwen3.8-27B INT8 W8A16 running locally on 4x RTX 3090: procedural 64x40x64 world, mining and building, water, fly mode, chiptune audio and full 1996 GeoCities chrome.",
   "accent": "#ff2975",
-  "tags": ["Sandbox", "WebGL", "Voxel", "Qwen3.8-27B", "Local", "Opencode"]
+  "tags": [
+    "Sandbox",
+    "WebGL",
+    "Voxel",
+    "Qwen3.8-27B",
+    "Local",
+    "Opencode"
+  ],
+  "category": "action-sandbox",
+  "model": "Qwen3.8-27B"
 }

@@ -4,5 +4,14 @@
   "version": "GLM-5.3",
   "description": "An arctic Three.js FPS built agentically by GLM-5.3 in Claude Code across 9.8 hours and 2130 tool calls: raymarched aurora, pump-action shotgun with a solved iron-sight ADS, blood on snow, exploding fuel drums and wave survival. The model has no vision, so it reviewed its own screenshots through an outside vision model.",
   "accent": "#4fe3b0",
-  "tags": ["FPS", "Three.js", "WebGL", "GLM-5.3", "Agentic", "Claude Code"]
+  "tags": [
+    "FPS",
+    "Three.js",
+    "WebGL",
+    "GLM-5.3",
+    "Agentic",
+    "Claude Code"
+  ],
+  "category": "shooters",
+  "model": "GLM-5.3"
 }
