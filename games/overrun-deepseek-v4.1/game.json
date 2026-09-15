@@ -14,5 +14,6 @@
     "Procedural Audio"
   ],
   "category": "shooters",
-  "model": "DeepSeek V4.1"
+  "model": "DeepSeek V4.1",
+  "cover": "cover.webp"
 }

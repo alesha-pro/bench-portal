@@ -11,5 +11,6 @@
     "Qwen3.8-Max"
   ],
   "category": "shooters",
-  "model": "Qwen3.8-Max"
+  "model": "Qwen3.8-Max",
+  "cover": "cover.webp"
 }

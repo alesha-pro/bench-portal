@@ -13,5 +13,6 @@
     "ASTRA"
   ],
   "category": "showcases",
-  "model": "GPT-6 Astra"
+  "model": "GPT-6 Astra",
+  "cover": "cover.webp"
 }

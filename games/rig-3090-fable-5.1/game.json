@@ -15,5 +15,6 @@
     "Claude Code"
   ],
   "category": "showcases",
-  "model": "Claude Fable 5.1"
+  "model": "Claude Fable 5.1",
+  "cover": "cover.webp"
 }

@@ -13,5 +13,6 @@
     "Procedural Audio"
   ],
   "category": "shooters",
-  "model": "GPT-6 Astra"
+  "model": "GPT-6 Astra",
+  "cover": "cover.webp"
 }

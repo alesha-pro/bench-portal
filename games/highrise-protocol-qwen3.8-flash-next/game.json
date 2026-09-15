@@ -13,5 +13,6 @@
     "omp"
   ],
   "category": "shooters",
-  "model": "Qwen3.8-Flash-Next"
+  "model": "Qwen3.8-Flash-Next",
+  "cover": "cover.webp"
 }

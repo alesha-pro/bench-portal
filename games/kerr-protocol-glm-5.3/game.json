@@ -14,5 +14,6 @@
     "Claude Code"
   ],
   "category": "visuals",
-  "model": "GLM-5.3"
+  "model": "GLM-5.3",
+  "cover": "cover.webp"
 }

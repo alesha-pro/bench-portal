@@ -13,5 +13,6 @@
     "WOW-factory"
   ],
   "category": "shooters",
-  "model": "GLM-5.3 Flash"
+  "model": "GLM-5.3 Flash",
+  "cover": "cover.webp"
 }

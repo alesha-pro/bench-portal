@@ -13,5 +13,6 @@
     "Opencode"
   ],
   "category": "action-sandbox",
-  "model": "Qwen3.8-27B"
+  "model": "Qwen3.8-27B",
+  "cover": "cover.webp"
 }
