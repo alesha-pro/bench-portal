@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PRISMFALL GRAND PRIX</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23140b26'/%3E%3Cpath d='M16 5l7 9-7 13-7-13z' fill='%2335e2d8'/%3E%3C/svg%3E" />
+  <script type="module" crossorigin src="./assets/index-oSxqlst1.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DmyAb3nu.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="game"></canvas>
+
+  <!-- ============ LOADING ============ -->
+  <div id="screen-loading" class="screen overlay">
+    <div class="load-wrap">
+      <div class="logo-small">PRISMFALL</div>
+      <div class="load-bar"><i id="load-fill"></i></div>
+      <div id="load-msg" class="load-msg">forging the circuit…</div>
+    </div>
+  </div>
+
+  <!-- ============ TITLE ============ -->
+  <div id="screen-title" class="screen overlay hidden">
+    <div class="bg-art"></div>
+    <div class="title-wrap">
+      <div class="title-kicker">CRYSTAL CANYON CIRCUIT · 3 LAPS</div>
+      <h1 class="title-main"><span>PRISMFALL</span><em>GRAND PRIX</em></h1>
+      <div class="title-sub">Six racers. One canyon. Zero mercy.</div>
+      <div class="title-buttons">
+        <button class="btn btn-primary" id="btn-start">START ENGINE</button>
+        <button class="btn" id="btn-howto">CONTROLS</button>
+      </div>
+      <div class="title-foot">A fully procedural WebGL racer — no external assets.</div>
+    </div>
+    <div id="howto" class="howto hidden">
+      <h3>CONTROLS</h3>
+      <div class="keys">
+        <div><kbd>W</kbd><kbd>↑</kbd><span>Accelerate</span></div>
+        <div><kbd>S</kbd><kbd>↓</kbd><span>Brake / Reverse</span></div>
+        <div><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd><span>Steer</span></div>
+        <div><kbd>Shift</kbd><span>Drift (hold in corners → mini-turbo)</span></div>
+        <div><kbd>Space</kbd><span>Fire item</span></div>
+        <div><kbd>R</kbd><span>Reset to track</span></div>
+        <div><kbd>Esc</kbd><kbd>P</kbd><span>Pause</span></div>
+        <div><kbd>M</kbd><span>Mute</span></div>
+      </div>
+      <button class="btn btn-small" id="btn-howto-close">GOT IT</button>
+    </div>
+  </div>
+
+  <!-- ============ CHARACTER SELECT ============ -->
+  <div id="screen-select" class="screen overlay hidden">
+    <div class="sel-head">
+      <h2>CHOOSE YOUR RACER</h2>
+      <div class="sel-hint">Pick a driver — each kart has its own feel.</div>
+    </div>
+    <div class="sel-body">
+      <div class="sel-left">
+        <div class="preview-frame"><canvas id="preview-host" width="420" height="300"></canvas><div class="preview-glow"></div></div>
+        <div id="sel-grid" class="sel-grid"></div>
+      </div>
+      <aside class="sel-panel">
+        <div id="sel-name" class="sel-name">—</div>
+        <div id="sel-tag" class="sel-tag">—</div>
+        <div id="sel-stats" class="sel-stats"></div>
+        <div id="sel-lore" class="sel-lore"></div>
+        <div class="sel-actions">
+          <button class="btn btn-primary" id="btn-race">RACE!</button>
+          <button class="btn" id="btn-back">BACK</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ============ HUD ============ -->
+  <div id="hud" class="hidden">
+    <div class="hud-tl">
+      <div class="lap-box">
+        <div class="lap-label">LAP</div>
+        <div class="lap-num"><span id="hud-lap">1</span><i>/3</i></div>
+      </div>
+      <div class="pos-box">
+        <div class="pos-num" id="hud-pos">1</div>
+        <div class="pos-label">POS</div>
+      </div>
+      <div class="coin-box" id="hud-coins-box">
+        <div class="coin-icon"></div>
+        <div class="coin-num" id="hud-coins">0</div>
+        <div class="coin-bonus" id="hud-coinbonus">+0%</div>
+      </div>
+    </div>
+
+    <div class="hud-tr">
+      <canvas id="minimap" width="196" height="196"></canvas>
+    </div>
+
+    <div class="hud-bl">
+      <div class="speed-wrap">
+        <div class="speed-num"><span id="hud-speed">0</span><i>KM/H</i></div>
+        <div class="speed-bar"><i id="hud-speedbar"></i></div>
+      </div>
+      <div class="drift-wrap">
+        <div id="drift-charge" class="drift-charge">
+          <div class="dc-track"><i id="dc-fill"></i><b class="m1"></b><b class="m2"></b><b class="m3"></b></div>
+          <div id="dc-label" class="dc-label">DRIFT</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hud-br">
+      <div class="item-slot" id="item-slot">
+        <canvas id="item-icon" width="120" height="120"></canvas>
+        <div class="item-roul" id="item-roul"></div>
+      </div>
+      <div class="boost-readout" id="boost-readout"><i></i><span>BOOST</span></div>
+    </div>
+
+    <div class="hud-tc">
+      <div class="lap-toast" id="lap-toast"></div>
+    </div>
+
+    <div class="centre-msg" id="centre-msg"></div>
+    <div id="countdown" class="countdown hidden"></div>
+    <div class="standings" id="standings"></div>
+    <div class="speedlines" id="speedlines"></div>
+    <div class="vignette" id="vignette"></div>
+    <div class="flash" id="flash"></div>
+  </div>
+
+  <!-- ============ PAUSE ============ -->
+  <div id="screen-pause" class="screen overlay hidden">
+    <div class="panel">
+      <h2>PAUSED</h2>
+      <div class="panel-rows">
+        <label class="row">MUSIC <input type="range" id="vol-music" min="0" max="100" value="55" /></label>
+        <label class="row">SFX <input type="range" id="vol-sfx" min="0" max="100" value="80" /></label>
+        <label class="row">QUALITY
+          <select id="sel-quality">
+            <option value="high">High</option>
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+      </div>
+      <div class="panel-buttons">
+        <button class="btn btn-primary" id="btn-resume">RESUME</button>
+        <button class="btn" id="btn-restart-p">RESTART RACE</button>
+        <button class="btn" id="btn-quit">QUIT TO MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ RESULTS ============ -->
+  <div id="screen-results" class="screen overlay hidden">
+    <div class="res-wrap">
+      <div class="res-head">
+        <h2 id="res-title">RACE COMPLETE</h2>
+        <div class="res-sub" id="res-sub"></div>
+      </div>
+      <div class="res-table" id="res-table"></div>
+      <div class="panel-buttons">
+        <button class="btn btn-primary" id="btn-again">RACE AGAIN</button>
+        <button class="btn" id="btn-menu">CHANGE RACER</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fatal" class="fatal hidden"></div>
+</div>
+</body>
+</html>

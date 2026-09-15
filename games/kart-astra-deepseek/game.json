@@ -1,0 +1,19 @@
+{
+  "slug": "kart-astra-deepseek",
+  "title": "Lumen Rally",
+  "category": "racing",
+  "model": "GPT-6 Astra",
+  "version": "DeepSeek subagents · September 2026",
+  "summary": "GPT-6 Astra leads, with DeepSeek V4.1 Flash subagents.",
+  "description": "GPT-6 Astra leads, with DeepSeek V4.1 Flash subagents. A browser kart racer made from the same game brief as the other 3 entries in this comparison. Each build started from scratch. Astra used medium reasoning and DeepSeek used max reasoning throughout.",
+  "accent": "#c4a6ff",
+  "tags": [
+    "Kart racer",
+    "Three.js",
+    "WebGL",
+    "Four-way kart comparison",
+    "Subagents",
+    "DeepSeek subagents"
+  ],
+  "cover": "cover.webp"
+}

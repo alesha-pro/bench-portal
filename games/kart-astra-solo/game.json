@@ -1,0 +1,18 @@
+{
+  "slug": "kart-astra-solo",
+  "title": "Tidebloom Rally",
+  "category": "racing",
+  "model": "GPT-6 Astra",
+  "version": "Solo · September 2026",
+  "summary": "Built by GPT-6 Astra alone, without subagents.",
+  "description": "Built by GPT-6 Astra alone, without subagents. A browser kart racer made from the same game brief as the other 3 entries in this comparison. Each build started from scratch. Astra used medium reasoning and DeepSeek used max reasoning throughout.",
+  "accent": "#f5cc71",
+  "tags": [
+    "Kart racer",
+    "Three.js",
+    "WebGL",
+    "Four-way kart comparison",
+    "Solo"
+  ],
+  "cover": "cover.webp"
+}

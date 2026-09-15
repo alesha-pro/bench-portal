@@ -1,0 +1,18 @@
+{
+  "slug": "kart-deepseek-solo",
+  "title": "Prismfall Grand Prix",
+  "category": "racing",
+  "model": "DeepSeek V4.1",
+  "version": "Solo · September 2026",
+  "summary": "Built by DeepSeek V4.1 Flash alone, without subagents.",
+  "description": "Built by DeepSeek V4.1 Flash alone, without subagents. A browser kart racer made from the same game brief as the other 3 entries in this comparison. Each build started from scratch. Astra used medium reasoning and DeepSeek used max reasoning throughout.",
+  "accent": "#98e18c",
+  "tags": [
+    "Kart racer",
+    "Three.js",
+    "WebGL",
+    "Four-way kart comparison",
+    "Solo"
+  ],
+  "cover": "cover.webp"
+}

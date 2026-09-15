@@ -1,0 +1,19 @@
+{
+  "slug": "kart-deepseek-astra",
+  "title": "Zephyr Reef Grand Prix",
+  "category": "racing",
+  "model": "DeepSeek V4.1",
+  "version": "Astra subagents · September 2026",
+  "summary": "DeepSeek V4.1 Flash leads, with GPT-6 Astra subagents.",
+  "description": "DeepSeek V4.1 Flash leads, with GPT-6 Astra subagents. A browser kart racer made from the same game brief as the other 3 entries in this comparison. Each build started from scratch. Astra used medium reasoning and DeepSeek used max reasoning throughout.",
+  "accent": "#62e2d8",
+  "tags": [
+    "Kart racer",
+    "Three.js",
+    "WebGL",
+    "Four-way kart comparison",
+    "Subagents",
+    "Astra subagents"
+  ],
+  "cover": "cover.webp"
+}
