@@ -1,0 +1,18 @@
+{
+  "slug": "voidbreaker-union-alpha",
+  "title": "VOIDBREAKER",
+  "category": "shooters",
+  "model": "Union Alpha",
+  "version": "September 16, 2026 \u00b7 OMP",
+  "summary": "A neon arena shooter with three weapons and escalating enemy waves.",
+  "description": "Built by stealth/union-alpha through OpenRouter using OMP, including its weapon and arena subagents. Features rifle red-dot ADS, a shotgun, a marksman rifle with 4\u00d7 scope, recoil, weapon inertia, physical cover, bloom and synthesized audio. Original generated game code; Three.js loads from a CDN.",
+  "accent": "#50e6ff",
+  "tags": [
+    "FPS",
+    "Three.js",
+    "WebGL",
+    "GLSL",
+    "OMP"
+  ],
+  "cover": "cover.png"
+}
