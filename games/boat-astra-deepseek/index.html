@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#082d38" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>TIDEBREAK — Corsair Run</title>
+    <script type="module" crossorigin src="./assets/index-OuvEgTv3.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-XdEcjRPf.css">
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="vignette"></div>
+    <header id="brand">
+      <span class="emblem">T / B</span
+      ><span>TIDEBREAK<small>CORSAIR RUN</small></span>
+    </header>
+    <div id="hud" class="hidden">
+      <div class="mission">
+        <span class="eyebrow">OPERATION / SUNKEN CROWN</span>
+        <h2 id="sector">01 — PALM CHANNEL</h2>
+        <div class="route">
+          <span id="gate">GATE 01 / 08</span>
+          <div><i id="routeFill"></i></div>
+          <span id="clock">00:00</span>
+        </div>
+      </div>
+      <div class="topright">
+        <span class="live">● LIVE RUN</span><strong id="score">00000</strong
+        ><small>SALVAGE SCORE</small>
+      </div>
+      <div id="targetHint"></div>
+      <div id="toast"></div>
+      <div class="telemetry">
+        <div class="speed"><strong id="speed">0</strong><span>KM/H</span></div>
+        <div class="systems">
+          <label>HULL <span id="healthText">100</span></label>
+          <div class="bar"><i id="healthFill"></i></div>
+          <label>BOOST <span>SHIFT</span></label>
+          <div class="bar boost"><i id="boostFill"></i></div>
+          <div id="powerups">SYSTEMS ONLINE</div>
+        </div>
+      </div>
+      <div class="bottomhelp">
+        W / S <b>THROTTLE</b> &nbsp; A / D <b>STEER</b> &nbsp; SPACE
+        <b>FIRE</b> &nbsp; SHIFT <b>BOOST</b><br /><span
+          >ESC PAUSE &nbsp; H HUD &nbsp; R RESTART</span
+        >
+      </div>
+      <div id="minimap">
+        <canvas id="map" width="120" height="180"></canvas
+        ><small>ARCHIPELAGO / 07</small>
+      </div>
+      <div id="crosshair">⌖</div>
+      <div id="lock" class="hidden"><span></span></div>
+    </div>
+    <main id="start" class="panel">
+      <div class="kicker">AN ARCHIPELAGO UNDER SIEGE</div>
+      <h1>TIDE<span>BREAK</span></h1>
+      <div class="subtitle">CORSAIR RUN <i></i> 07° NORTH</div>
+      <p class="intro">
+        Cut through the turquoise. Break the blockade.<br />One boat. Eight
+        gates. No safe harbour.
+      </p>
+      <div class="controls">
+        <div><kbd>W</kbd><kbd>S</kbd><small>THROTTLE / BRAKE</small></div>
+        <div><kbd>A</kbd><kbd>D</kbd><small>STEER</small></div>
+        <div><kbd>SPACE</kbd><small>AUTO-TARGET FIRE</small></div>
+        <div><kbd>SHIFT</kbd><small>AFTERBURNER</small></div>
+      </div>
+      <button id="launch">LAUNCH OPERATION <span>↗</span></button>
+      <div class="startfoot">
+        <button id="signature" class="textbutton">WATERFALL RUN ↗</button
+        ><span>DETERMINISTIC ROUTE · SEED 07</span>
+      </div>
+      <div class="settings">
+        <label><input id="sound" type="checkbox" checked /> AUDIO</label
+        ><label
+          >QUALITY
+          <select id="quality">
+            <option value="high">HIGH</option>
+            <option value="low">PERFORMANCE</option>
+          </select></label
+        >
+      </div>
+    </main>
+    <div id="end" class="panel hidden">
+      <div id="endKicker" class="kicker">OPERATION COMPLETE</div>
+      <h1 id="endTitle">CLEAR<br /><span>WATER.</span></h1>
+      <p id="endCopy"></p>
+      <div id="endStats"></div>
+      <button id="again">RUN IT AGAIN <span>↗</span></button
+      ><button id="home" class="textbutton">RETURN TO BRIEFING</button>
+    </div>
+    <div id="pause" class="panel hidden">
+      <div class="kicker">ENGINE IDLE</div>
+      <h1>HOLD<br /><span>FAST.</span></h1>
+      <p>The archipelago can wait.</p>
+      <button id="resume">RESUME RUN <span>↗</span></button>
+      <div class="settings">
+        <span>M toggles audio · Q changes quality</span>
+      </div>
+    </div>
+    <div id="damage"></div>
+    <div id="loading">CHARTING THE ARCHIPELAGO…</div>
+  </body>
+</html>

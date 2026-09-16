@@ -1,0 +1,19 @@
+{
+  "slug": "boat-deepseek-astra",
+  "title": "Tidebreaker: Reef Assault",
+  "category": "racing",
+  "model": "DeepSeek V4.1",
+  "version": "Astra subagents · September 2026",
+  "summary": "DeepSeek V4.1 Flash leads, with GPT-6 Astra subagents.",
+  "description": "Race through a tropical archipelago, fire on patrol boats and navigate a sea cave before the waterfall jump. Built in OMP from the shared combat-speedboat brief. Astra used medium reasoning and DeepSeek used max.",
+  "accent": "#62e2d8",
+  "tags": [
+    "Boat combat",
+    "Three.js",
+    "WebGL",
+    "Boat team comparison",
+    "Subagents",
+    "Astra subagents"
+  ],
+  "cover": "cover.webp"
+}

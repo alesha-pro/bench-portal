@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TIDEBREAKER — Tropical Combat Speedboat</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>" />
+  <script type="module" crossorigin src="./assets/index-D9d5dyJv.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Ce8uDzL8.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="gl"></canvas>
+
+    <!-- ======== START SCREEN ======== -->
+    <div id="screen-start" class="screen">
+      <div class="start-bg"></div>
+      <div class="start-inner">
+        <div class="title-block">
+          <div class="title-kicker">CORAL COIRIE ARCHIPELAGO &nbsp;·&nbsp; PATROL DIVISION 07</div>
+          <h1 class="game-title"><span>TIDE</span><span class="title-accent">BREAKER</span></h1>
+          <div class="title-sub">A tropical combat-speedboat run through reef, cave and fire</div>
+        </div>
+
+        <div class="start-columns">
+          <div class="panel controls-panel">
+            <div class="panel-title">CONTROLS</div>
+            <div class="ctl-grid">
+              <div class="ctl"><span class="key">W</span><span class="key alt">↑</span><span class="ctl-label">Throttle</span></div>
+              <div class="ctl"><span class="key">S</span><span class="key alt">↓</span><span class="ctl-label">Brake / Reverse</span></div>
+              <div class="ctl"><span class="key">A</span><span class="key">D</span><span class="ctl-label">Steer</span></div>
+              <div class="ctl"><span class="key wide">SHIFT</span><span class="ctl-label">Boost</span></div>
+              <div class="ctl"><span class="key wide">SPACE</span><span class="ctl-label">Fire (auto-aim)</span></div>
+              <div class="ctl"><span class="key">H</span><span class="ctl-label">Toggle HUD</span></div>
+              <div class="ctl"><span class="key">P</span><span class="ctl-label">Pause</span></div>
+              <div class="ctl"><span class="key">R</span><span class="ctl-label">Restart</span></div>
+            </div>
+          </div>
+          <div class="panel briefing-panel">
+            <div class="panel-title">MISSION BRIEFING</div>
+            <ul class="brief-list">
+              <li>Thread all <b>18 gates</b> from the lagoon to Harbor Nine.</li>
+              <li>Raiders patrol the reefs — <b>outgun or outrun</b> them.</li>
+              <li>Grab <b class="c-boost">boost</b>, <b class="c-shield">shields</b> and <b class="c-double">double shot</b> canisters.</li>
+              <li>Inside the sea cave, ride the sill and <b>launch past the falls</b>.</li>
+              <li>Hull at zero = mission over. The sea does not forgive.</li>
+            </ul>
+            <div class="quality-row">
+              <span class="quality-label">QUALITY</span>
+              <div class="quality-opts" id="quality-opts">
+                <button data-q="low">LOW</button>
+                <button data-q="medium" class="sel">MEDIUM</button>
+                <button data-q="high">HIGH</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button id="btn-start" class="btn-launch">START PATROL&nbsp;&nbsp;▶</button>
+        <div class="start-foot">Runs locally · headphones recommended · progress saves nothing, glory saves everything</div>
+      </div>
+    </div>
+
+    <!-- ======== HUD ======== -->
+    <div id="hud" class="hidden">
+      <div class="hud-top">
+        <div class="hud-gates">
+          <div class="gate-count" id="hud-gate">GATE <b>1</b>/18</div>
+          <div class="gate-timer" id="hud-timer">0:00.0</div>
+        </div>
+        <canvas id="minimap" width="196" height="236"></canvas>
+        <div class="hud-right">
+          <div class="hud-kills" id="hud-kills">KILLS 0</div>
+          <div class="hud-hint" id="hud-hint"></div>
+        </div>
+      </div>
+
+      <div class="hud-bl">
+        <div class="speedo">
+          <div class="speed-num"><span id="hud-speed">0</span><span class="speed-unit">KN</span></div>
+          <div class="boost-wrap"><div class="boost-bar" id="boost-bar"></div></div>
+          <div class="boost-label">BOOST</div>
+        </div>
+      </div>
+
+      <div class="hud-br">
+        <div class="statbars">
+          <div class="sb"><div class="sb-fill hull" id="hull-bar"></div></div>
+          <div class="sb"><div class="sb-fill shield" id="shield-bar"></div></div>
+          <div class="wpn" id="wpn-state">SINGLE SHOT</div>
+        </div>
+      </div>
+
+      <div id="toasts"></div>
+      <div id="vignette"></div>
+      <div id="dmg-flash"></div>
+      <div id="boost-vignette"></div>
+    </div>
+
+    <!-- ======== COUNTDOWN ======== -->
+    <div id="countdown" class="hidden"><div id="countdown-num">3</div><div id="countdown-sub">WARM UP YOUR ENGINES</div></div>
+
+    <!-- ======== PAUSE ======== -->
+    <div id="screen-pause" class="screen hidden">
+      <div class="pause-box">
+        <h2>PAUSED</h2>
+        <div class="pause-btns">
+          <button id="btn-resume">RESUME</button>
+          <button id="btn-restart">RESTART RUN</button>
+          <button id="btn-quit">QUIT TO TITLE</button>
+        </div>
+        <div class="quality-row">
+          <span class="quality-label">QUALITY</span>
+          <div class="quality-opts" id="quality-opts-pause">
+            <button data-q="low">LOW</button>
+            <button data-q="medium">MEDIUM</button>
+            <button data-q="high">HIGH</button>
+          </div>
+        </div>
+        <div class="pause-note">H toggles HUD · R restarts instantly</div>
+      </div>
+    </div>
+
+    <!-- ======== END SCREENS ======== -->
+    <div id="screen-end" class="screen hidden">
+      <div class="end-box">
+        <h2 id="end-title">MISSION COMPLETE</h2>
+        <div id="end-sub" class="end-sub"></div>
+        <div class="end-stats" id="end-stats"></div>
+        <button id="btn-again" class="btn-launch">RUN IT AGAIN&nbsp;&nbsp;↻</button>
+        <div class="start-foot">or press <b>R</b></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

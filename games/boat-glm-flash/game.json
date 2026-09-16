@@ -1,0 +1,19 @@
+{
+  "slug": "boat-glm-flash",
+  "title": "Tidebreaker: Harbor Nine",
+  "category": "racing",
+  "model": "GLM-5.3",
+  "version": "GLM-5.3 Flash subagents · September 2026",
+  "summary": "GLM-5.3 leads, with GLM-5.3 Flash subagents.",
+  "description": "An 18-gate speedboat route with mines, enemy boats, pickups and a waterfall ambush. Built in OMP from the shared combat-speedboat brief. Flash handled screenshot reviews for the text-only lead; GLM-5.3 later repaired a startup error on its own. Both models used max reasoning.",
+  "accent": "#f4cf6a",
+  "tags": [
+    "Boat combat",
+    "Three.js",
+    "WebGL",
+    "Boat team comparison",
+    "Subagents",
+    "GLM-5.3 Flash subagents"
+  ],
+  "cover": "cover.webp"
+}
