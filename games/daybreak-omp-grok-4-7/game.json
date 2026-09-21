@@ -1,0 +1,11 @@
+{
+  "slug": "daybreak-omp-grok-4-7",
+  "title": "DAYBREAK // KILLHOUSE — OMP",
+  "category": "shooters",
+  "model": "Grok 4.7",
+  "version": "September 21, 2026 · OMP / Grok 4.7",
+  "summary": "An OMP-built daytime Three.js horde shooter with a rifle, shotgun and tactical movement.",
+  "description": "A standalone DAYBREAK // KILLHOUSE comparison build created in OMP by Grok 4.7. It features a sunlit killhouse arena, weapon switching, aim-down-sights, enemy waves, recoil, hit effects and a recording HUD toggle.",
+  "accent": "#e6a23c",
+  "tags": ["FPS", "Three.js", "WebGL", "OMP", "Grok 4.7"]
+}
