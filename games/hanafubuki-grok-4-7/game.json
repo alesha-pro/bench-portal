@@ -1,0 +1,11 @@
+{
+  "slug": "hanafubuki-grok-4-7",
+  "title": "Hanafubuki",
+  "category": "action-sandbox",
+  "model": "Grok 4.7",
+  "version": "September 21, 2026 · Grok CLI",
+  "summary": "A third-person sakura-court duel with parries, dashes and a three-cut chain.",
+  "description": "A compact Three.js samurai action game built by Grok 4.7 through Grok CLI. Fight through three duels in a sunlit sakura court, using cuts, timed parries and dashes while petals fall across the arena.",
+  "accent": "#f3b7c4",
+  "tags": ["Action", "Three.js", "WebGL", "Samurai", "Sakura", "Grok 4.7", "Grok CLI"]
+}
