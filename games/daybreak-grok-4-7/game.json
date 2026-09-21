@@ -1,0 +1,11 @@
+{
+  "slug": "daybreak-grok-4-7",
+  "title": "DAYBREAK // KILLHOUSE",
+  "category": "shooters",
+  "model": "Grok 4.7",
+  "version": "September 21, 2026 · Grok CLI",
+  "summary": "A bright Three.js horde shooter with a carbine and pump shotgun.",
+  "description": "A daytime tactical arena FPS built by Grok 4.7 through Grok CLI. Features a carbine with red-dot aiming, a pump shotgun, enemy waves, weapon swapping, reloading, procedural effects, synthesized audio and a HUD-hide control for recording.",
+  "accent": "#d5a84e",
+  "tags": ["FPS", "Three.js", "WebGL", "Grok 4.7", "Grok CLI"]
+}
