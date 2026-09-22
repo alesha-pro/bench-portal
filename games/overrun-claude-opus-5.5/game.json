@@ -1,0 +1,12 @@
+{
+  "slug": "overrun-claude-opus-5.5",
+  "title": "OVERRUN — Dockyard Nine",
+  "category": "shooters",
+  "model": "Claude Opus 5.5",
+  "version": "September 22, 2026 · Claude Code",
+  "summary": "Defend a dockyard against escalating waves of combat synthetics.",
+  "description": "A first-person horde shooter set in Dockyard Nine. Fight with an assault rifle, pump shotgun and marksman rifle; use grenades, melee attacks and explosive barrels while collecting ammunition and surviving increasingly difficult waves. The Three.js game includes a 3D industrial arena, generated textures and synthesized audio.",
+  "accent": "#e8442a",
+  "tags": ["FPS", "Three.js", "WebGL", "Claude Code", "Procedural Audio"],
+  "cover": "cover.webp"
+}
