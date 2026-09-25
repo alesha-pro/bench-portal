@@ -1,0 +1,20 @@
+{
+  "slug": "trenchcam-claude-opus-5.5",
+  "title": "TRENCHCAM — BLOCK 17",
+  "category": "shooters",
+  "model": "Claude Opus 5.5",
+  "version": "September 25, 2026 · Claude Code",
+  "summary": "Clear a five-storey apartment block at night through a chest-mounted bodycam.",
+  "description": "A realistic first-person shooter seen through a simulated chest-mounted bodycam: fisheye lens, rolling shutter, sensor noise, auto exposure and video compression. On BLOCK 17 you clear a five-storey building held by 22 defenders. Gunfire alarms a floor: one defender moves up to check it while a partner covers from behind, the rest set ambushes on the doorways, reloading defenders call for covering fire, and broken defenders fall back to another room or upstairs. Low health pulses the frame with the heartbeat and puts blood on the lens; deaths fall differently depending on the killing shot. Also includes a trench-line map with team rounds. Built with Three.js WebGPU, Rapier physics, a navmesh and procedural audio.",
+  "accent": "#c9a55a",
+  "tags": [
+    "FPS",
+    "Three.js",
+    "WebGPU",
+    "Claude Code",
+    "Bodycam",
+    "Tactical AI",
+    "Blender"
+  ],
+  "cover": "cover.webp"
+}

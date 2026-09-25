@@ -1,0 +1,406 @@
+{
+ "guns": {
+  "ka74": {
+   "near": [
+    "guns/ka74_near0.ogg",
+    "guns/ka74_near1.ogg",
+    "guns/ka74_near2.ogg",
+    "guns/ka74_near3.ogg"
+   ],
+   "far": [
+    "guns/ka74_far0.ogg",
+    "guns/ka74_far1.ogg"
+   ]
+  },
+  "sg5k": {
+   "near": [
+    "guns/sg5k_near0.ogg",
+    "guns/sg5k_near1.ogg",
+    "guns/sg5k_near2.ogg"
+   ],
+   "far": [
+    "guns/sg5k_far0.ogg",
+    "guns/sg5k_far1.ogg",
+    "guns/sg5k_far2.ogg"
+   ]
+  },
+  "bk101": {
+   "near": [
+    "guns/bk101_near0.ogg",
+    "guns/bk101_near1.ogg",
+    "guns/bk101_near2.ogg",
+    "guns/bk101_near3.ogg"
+   ],
+   "far": [
+    "guns/bk101_far0.ogg",
+    "guns/bk101_far1.ogg"
+   ]
+  },
+  "rivington": {
+   "near": [
+    "guns/rivington_near0.ogg",
+    "guns/rivington_near1.ogg",
+    "guns/rivington_near2.ogg",
+    "guns/rivington_near3.ogg"
+   ],
+   "far": [
+    "guns/rivington_far0.ogg",
+    "guns/rivington_far1.ogg",
+    "guns/rivington_far2.ogg"
+   ]
+  },
+  "cr75": {
+   "near": [
+    "guns/cr75_near0.ogg",
+    "guns/cr75_near1.ogg",
+    "guns/cr75_near2.ogg"
+   ],
+   "far": [
+    "guns/cr75_far0.ogg",
+    "guns/cr75_far1.ogg"
+   ]
+  }
+ },
+ "vox": {
+  "death": [
+   {
+    "f": "vox/death_00.ogg",
+    "rms": 0.2193,
+    "src": "3yell1.wav"
+   },
+   {
+    "f": "vox/death_01.ogg",
+    "rms": 0.1623,
+    "src": "3yell2.wav"
+   },
+   {
+    "f": "vox/death_02.ogg",
+    "rms": 0.1446,
+    "src": "3yell5.wav"
+   },
+   {
+    "f": "vox/death_03.ogg",
+    "rms": 0.1197,
+    "src": "3yell6.wav"
+   },
+   {
+    "f": "vox/death_04.ogg",
+    "rms": 0.1638,
+    "src": "3yell9.wav"
+   },
+   {
+    "f": "vox/death_05.ogg",
+    "rms": 0.1459,
+    "src": "3yell11.wav"
+   },
+   {
+    "f": "vox/death_06.ogg",
+    "rms": 0.2132,
+    "src": "3yell14.wav"
+   },
+   {
+    "f": "vox/death_07.ogg",
+    "rms": 0.0929,
+    "src": "2yell3.wav"
+   },
+   {
+    "f": "vox/death_08.ogg",
+    "rms": 0.1089,
+    "src": "2yell8.wav"
+   },
+   {
+    "f": "vox/death_09.ogg",
+    "rms": 0.0514,
+    "src": "2yell5.wav"
+   },
+   {
+    "f": "vox/death_10.ogg",
+    "rms": 0.2085,
+    "src": "yell1.wav"
+   },
+   {
+    "f": "vox/death_11.ogg",
+    "rms": 0.1653,
+    "src": "yell2.wav"
+   },
+   {
+    "f": "vox/death_12.ogg",
+    "rms": 0.2046,
+    "src": "yell4.wav"
+   },
+   {
+    "f": "vox/death_13.ogg",
+    "rms": 0.1691,
+    "src": "yell5.wav"
+   },
+   {
+    "f": "vox/death_14.ogg",
+    "rms": 0.1553,
+    "src": "yell10.wav"
+   },
+   {
+    "f": "vox/death_15.ogg",
+    "rms": 0.1704,
+    "src": "yell11.wav"
+   },
+   {
+    "f": "vox/death_16.ogg",
+    "rms": 0.2036,
+    "src": "1yell4.wav"
+   },
+   {
+    "f": "vox/death_17.ogg",
+    "rms": 0.141,
+    "src": "1yell5.wav"
+   }
+  ],
+  "pain": [
+   {
+    "f": "vox/pain_00.ogg",
+    "rms": 0.0858,
+    "src": "1yell2.wav"
+   },
+   {
+    "f": "vox/pain_01.ogg",
+    "rms": 0.1375,
+    "src": "1yell3.wav"
+   },
+   {
+    "f": "vox/pain_02.ogg",
+    "rms": 0.0748,
+    "src": "1yell6.wav"
+   },
+   {
+    "f": "vox/pain_03.ogg",
+    "rms": 0.1099,
+    "src": "1yell7.wav"
+   },
+   {
+    "f": "vox/pain_04.ogg",
+    "rms": 0.0899,
+    "src": "1yell8.wav"
+   },
+   {
+    "f": "vox/pain_05.ogg",
+    "rms": 0.0945,
+    "src": "1yell10.wav"
+   },
+   {
+    "f": "vox/pain_06.ogg",
+    "rms": 0.08,
+    "src": "1yell14.wav"
+   },
+   {
+    "f": "vox/pain_07.ogg",
+    "rms": 0.1069,
+    "src": "2yell1.wav"
+   },
+   {
+    "f": "vox/pain_08.ogg",
+    "rms": 0.1393,
+    "src": "2yell2.wav"
+   },
+   {
+    "f": "vox/pain_09.ogg",
+    "rms": 0.0968,
+    "src": "2yell10.wav"
+   },
+   {
+    "f": "vox/pain_10.ogg",
+    "rms": 0.1362,
+    "src": "3yell3.wav"
+   },
+   {
+    "f": "vox/pain_11.ogg",
+    "rms": 0.14,
+    "src": "3yell4.wav"
+   },
+   {
+    "f": "vox/pain_12.ogg",
+    "rms": 0.1121,
+    "src": "3yell8.wav"
+   },
+   {
+    "f": "vox/pain_13.ogg",
+    "rms": 0.0833,
+    "src": "yell3.wav"
+   },
+   {
+    "f": "vox/pain_14.ogg",
+    "rms": 0.1078,
+    "src": "yell8.wav"
+   },
+   {
+    "f": "vox/pain_15.ogg",
+    "rms": 0.165,
+    "src": "yell12.wav"
+   },
+   {
+    "f": "vox/pain_16.ogg",
+    "rms": 0.1008,
+    "src": "yell13.wav"
+   },
+   {
+    "f": "vox/pain_17.ogg",
+    "rms": 0.1866,
+    "src": "death pain grunts.wav@6.88"
+   },
+   {
+    "f": "vox/pain_18.ogg",
+    "rms": 0.1897,
+    "src": "death pain grunts.wav@29.80"
+   },
+   {
+    "f": "vox/pain_19.ogg",
+    "rms": 0.0526,
+    "src": "death pain grunts.wav@38.78"
+   },
+   {
+    "f": "vox/pain_20.ogg",
+    "rms": 0.102,
+    "src": "death pain grunts.wav@40.35"
+   },
+   {
+    "f": "vox/pain_21.ogg",
+    "rms": 0.0373,
+    "src": "death pain grunts.wav@17.40"
+   }
+  ],
+  "grunt": [
+   {
+    "f": "vox/grunt_00.ogg",
+    "rms": 0.1836,
+    "src": "3grunt1.wav"
+   },
+   {
+    "f": "vox/grunt_01.ogg",
+    "rms": 0.0516,
+    "src": "3grunt2.wav"
+   },
+   {
+    "f": "vox/grunt_02.ogg",
+    "rms": 0.0817,
+    "src": "3grunt3.wav"
+   },
+   {
+    "f": "vox/grunt_03.ogg",
+    "rms": 0.1207,
+    "src": "3grunt4.wav"
+   },
+   {
+    "f": "vox/grunt_04.ogg",
+    "rms": 0.0966,
+    "src": "3grunt5.wav"
+   },
+   {
+    "f": "vox/grunt_05.ogg",
+    "rms": 0.0595,
+    "src": "3grunt6.wav"
+   },
+   {
+    "f": "vox/grunt_06.ogg",
+    "rms": 0.0474,
+    "src": "yell6.wav"
+   }
+  ],
+  "shout": [
+   {
+    "f": "vox/shout_00.ogg",
+    "rms": 0.0932,
+    "src": "2yell4.wav"
+   },
+   {
+    "f": "vox/shout_01.ogg",
+    "rms": 0.1734,
+    "src": "2yell11.wav"
+   },
+   {
+    "f": "vox/shout_02.ogg",
+    "rms": 0.1349,
+    "src": "2yell9.wav"
+   },
+   {
+    "f": "vox/shout_03.ogg",
+    "rms": 0.0729,
+    "src": "3yell7.wav"
+   },
+   {
+    "f": "vox/shout_04.ogg",
+    "rms": 0.1902,
+    "src": "3yell12.wav"
+   }
+  ],
+  "moan": [
+   {
+    "f": "vox/moan_00.ogg",
+    "rms": 0.2454,
+    "src": "death pain grunts.wav@0.45"
+   },
+   {
+    "f": "vox/moan_01.ogg",
+    "rms": 0.1403,
+    "src": "death pain grunts.wav@3.90"
+   },
+   {
+    "f": "vox/moan_02.ogg",
+    "rms": 0.1247,
+    "src": "death pain grunts.wav@8.30"
+   },
+   {
+    "f": "vox/moan_03.ogg",
+    "rms": 0.0347,
+    "src": "death pain grunts.wav@9.95"
+   },
+   {
+    "f": "vox/moan_04.ogg",
+    "rms": 0.1712,
+    "src": "death pain grunts.wav@14.40"
+   },
+   {
+    "f": "vox/moan_05.ogg",
+    "rms": 0.118,
+    "src": "death pain grunts.wav@20.30"
+   },
+   {
+    "f": "vox/moan_06.ogg",
+    "rms": 0.1155,
+    "src": "death pain grunts.wav@23.83"
+   },
+   {
+    "f": "vox/moan_07.ogg",
+    "rms": 0.1152,
+    "src": "death pain grunts.wav@27.53"
+   },
+   {
+    "f": "vox/moan_08.ogg",
+    "rms": 0.1347,
+    "src": "death pain grunts.wav@31.45"
+   },
+   {
+    "f": "vox/moan_09.ogg",
+    "rms": 0.0512,
+    "src": "death pain grunts.wav@33.45"
+   },
+   {
+    "f": "vox/moan_10.ogg",
+    "rms": 0.3345,
+    "src": "death pain grunts.wav@35.90"
+   },
+   {
+    "f": "vox/moan_11.ogg",
+    "rms": 0.0231,
+    "src": "death pain grunts.wav@42.16"
+   },
+   {
+    "f": "vox/moan_12.ogg",
+    "rms": 0.0489,
+    "src": "death pain grunts.wav@44.89"
+   },
+   {
+    "f": "vox/moan_13.ogg",
+    "rms": 0.1439,
+    "src": "death pain grunts.wav@47.33"
+   }
+  ]
+ }
+}
