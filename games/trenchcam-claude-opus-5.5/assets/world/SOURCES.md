@@ -1,6 +1,6 @@
 # World assets: sources and licenses
 
-All textures below are **CC0** (public domain) from [Poly Haven](https://polyhaven.com/license), downloaded at 1K (JPG/PNG) and re-encoded to WebP (quality 70–80) with `cwebp`. Files: `tex/<id>_diff.webp` (albedo), `tex/<id>_nor.webp` (OpenGL normal), `tex/<id>_arm.webp` (AO/roughness/metal packed; for `rough_wood` built from the roughness map with ImageMagick, R=1, B=0).
+The Poly Haven textures in the table below are **CC0** (public domain), see [license](https://polyhaven.com/license). Originally downloaded at 1K and encoded to WebP. On 2026-09-26, `church_bricks_03`, `worn_plaster_wall`, and `concrete_floor_damaged_01` were repacked with 2K colour/OpenGL normals and 1K ORM/normalised displacement. Exact download URLs and output hashes: [sources.json](../../../research/textures-2026-09-26/sources.json). Files: `tex/<id>_diff.webp` (albedo), `_nor.webp` (OpenGL normal), `_arm.webp` (AO/roughness/metal), and `_height.webp` (white = high, where present).
 
 | Files | Asset | Author(s) | Source | License |
 |---|---|---|---|---|
@@ -19,4 +19,9 @@ All textures below are **CC0** (public domain) from [Poly Haven](https://polyhav
 | tex/rusty_metal_02_diff/nor/arm.webp | Rusty Metal 02 | Rob Tuytel | https://polyhaven.com/a/rusty_metal_02 | CC0 |
 | tex/dirt_diff/nor/arm.webp | Dirt | Charlotte Baglioni | https://polyhaven.com/a/dirt | CC0 |
 
-Everything else in the level (terrain, trenches, church, tunnels, trees, wire, signs, smoke) is procedural (code in src/world).
+## Authored surfaces (2026-09-26)
+
+- `tex/block17_terrazzo_{diff,nor,arm,height}.webp`: generated base colour (OpenAI built-in imagegen), with authored joints, bevels, normal/ORM/height from `tools/assets/build-surface-textures.mjs`. [Original and exact prompt](../../../research/textures-2026-09-26/prompt.md). Generated asset, not a Poly Haven/CC0 scan.
+- `tex/weapon_micro.webp`: own deterministic micro-normal/roughness texture, built by the same script.
+
+Level structures (terrain, trenches, church, tunnels, trees, wire, signs, smoke) are procedural (`src/world`). Downloaded/generated prop models are documented separately in their asset directories and CREDITS.md.
