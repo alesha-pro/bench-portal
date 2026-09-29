@@ -1,0 +1,20 @@
+{
+  "slug": "fogline",
+  "title": "FOGLINE — Bodycam // Sector 7",
+  "category": "shooters",
+  "model": null,
+  "version": "September 29, 2026 build",
+  "summary": "Hold a rain-soaked, fog-bound trench arena against infantry hordes, FPV drones and mortar fire, seen through a chest-mounted bodycam.",
+  "description": "A bodycam-style first-person horde shooter. Four weapons — the KR-4 carbine, VX-9 SMG, SG-12 pump shotgun and DM-7 marksman rifle — each with its own recoil pattern, weapon inertia, procedural reloads and hands. A gunsmith between waves lets you fit optics (red dot, holo, 4x, 8x), suppressors and other muzzle devices, grips, laser or weapon light and extended magazines, with a rotatable 3D showcase. Waves bring riflemen, rushers, armoured heavies, grenadiers, snipers, FPV and bomber drones and recon-called mortar strikes, with recruit, veteran and nightmare difficulties. The bodycam look includes fisheye lens, rain on the lens, chromatic aberration, auto exposure, sensor grain and compression. Every texture, model, animation and sound is generated procedurally at load: no external assets. Built with Three.js (WebGL2) and hand-written GLSL. Click to lock the mouse; WASD move, mouse fire and aim, R reload, 1-4 switch weapon, Tab gunsmith between waves.",
+  "accent": "#ff6a1a",
+  "tags": [
+    "FPS",
+    "Three.js",
+    "WebGL2",
+    "GLSL",
+    "Bodycam",
+    "Horde",
+    "Procedural"
+  ],
+  "cover": "cover.webp"
+}
