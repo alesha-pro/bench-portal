@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ARENA BLAST — Horde Shooter</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #050507; }
+    #game { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    /* ---------- HUD ---------- */
+    #hud { position: fixed; inset: 0; pointer-events: none; display: none;
+           font-family: 'Segoe UI', 'Arial Black', sans-serif; color: #fff; user-select: none; }
+    #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+    #crosshair .dot { position:absolute; left:50%; top:50%; width:4px; height:4px; margin:-2px;
+                      background:#ff3b30; border-radius:50%; box-shadow:0 0 6px #ff3b30; }
+    #crosshair .arm { position:absolute; background:#ff3b30; box-shadow:0 0 4px rgba(255,59,48,.8); }
+    #crosshair .arm.h { width:14px; height:2px; }
+    #crosshair .arm.v { width:2px; height:14px; }
+    #crosshair .a-l { left:calc(50% - 20px); top:50%; transform:translateY(-50%); }
+    #crosshair .a-r { left:calc(50% + 6px);  top:50%; transform:translateY(-50%); }
+    #crosshair .a-t { top:calc(50% - 20px); left:50%; transform:translateX(-50%); }
+    #crosshair .a-b { top:calc(50% + 6px);  left:50%; transform:translateX(-50%); }
+    #reddot { position:absolute; left:50%; top:50%; width:5px; height:5px; margin:-2.5px;
+              background:#ff2020; border-radius:50%; box-shadow:0 0 10px 2px rgba(255,32,32,.9);
+              display:none; }
+
+    #ammo { position:absolute; right:36px; bottom:30px; text-align:right; }
+    #ammo .mag { font-size:44px; font-weight:900; letter-spacing:1px;
+                 text-shadow:0 2px 8px rgba(0,0,0,.9); }
+    #ammo .mag span { font-size:22px; color:#9aa0a6; font-weight:700; }
+    #ammo .wpname { font-size:14px; letter-spacing:4px; color:#ffb020; font-weight:800;
+                    text-transform:uppercase; text-shadow:0 1px 4px #000; }
+
+    #healthbar { position:absolute; left:36px; bottom:30px; width:280px; }
+    #healthbar .label { font-size:12px; letter-spacing:3px; color:#9aa0a6; font-weight:800; margin-bottom:6px; }
+    #healthbar .bar { height:14px; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.25);
+                     border-radius:3px; overflow:hidden; }
+    #healthbar .fill { height:100%; width:100%; background:linear-gradient(90deg,#c1121f,#ff4d4d);
+                       transition:width .15s; }
+    #healthbar .shield { height:100%; background:linear-gradient(90deg,#1d3557,#4cc9f0);
+                         position:absolute; top:20px; left:0; transition:width .15s; }
+
+    #wavebox { position:absolute; top:26px; left:50%; transform:translateX(-50%); text-align:center; }
+    #wavebox .w { font-size:15px; letter-spacing:6px; color:#9aa0a6; font-weight:800; }
+    #wavebox .n { font-size:40px; font-weight:900; text-shadow:0 0 18px rgba(255,176,32,.6); }
+    #wavebox .k { font-size:12px; letter-spacing:3px; color:#ffb020; font-weight:800; }
+
+    #scorebox { position:absolute; top:26px; right:36px; text-align:right; }
+    #scorebox .s { font-size:34px; font-weight:900; }
+    #scorebox .l { font-size:11px; letter-spacing:3px; color:#9aa0a6; font-weight:800; }
+
+    #hitmarker { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+                 width:34px; height:34px; opacity:0; transition:opacity .05s; pointer-events:none; }
+    #hitmarker::before, #hitmarker::after { content:''; position:absolute; background:#fff;
+                 box-shadow:0 0 6px #fff; }
+    #hitmarker::before { left:50%; top:0; width:2px; height:9px; transform:translateX(-50%); }
+    #hitmarker::after  { left:50%; bottom:0; width:2px; height:9px; transform:translateX(-50%); }
+    #hitmarker .hm-l, #hitmarker .hm-r { position:absolute; top:50%; width:9px; height:2px; background:#fff;
+                 box-shadow:0 0 6px #fff; transform:translateY(-50%); }
+    #hitmarker .hm-l { left:0; } #hitmarker .hm-r { right:0; }
+    #hitmarker.headshot { filter:hue-rotate(0deg); }
+    #hitmarker.headshot::before, #hitmarker.headshot::after,
+    #hitmarker.headshot .hm-l, #hitmarker.headshot .hm-r { background:#ffd60a; box-shadow:0 0 8px #ffd60a; }
+
+    #dmgflash { position:fixed; inset:0; pointer-events:none; opacity:0;
+                background:radial-gradient(circle, transparent 40%, rgba(255,30,30,.55) 100%); }
+    #lowhp { position:fixed; inset:0; pointer-events:none; opacity:0;
+             box-shadow:inset 0 0 140px 30px rgba(255,0,0,.5); transition:opacity .2s; }
+
+    #weaponwheel { position:absolute; left:50%; bottom:110px; transform:translateX(-50%);
+                   display:none; gap:18px; }
+    #weaponwheel .slot { padding:10px 18px; border:2px solid rgba(255,255,255,.3);
+                        background:rgba(0,0,0,.6); font-weight:900; letter-spacing:2px; border-radius:6px; }
+    #weaponwheel .slot.active { border-color:#ffb020; color:#ffb020; }
+
+    #centermsg { position:absolute; left:50%; top:38%; transform:translateX(-50%);
+                 font-size:26px; font-weight:900; letter-spacing:4px; text-align:center;
+                 text-shadow:0 2px 12px #000; opacity:0; transition:opacity .25s; }
+
+    #interact { position:absolute; left:50%; bottom:22%; transform:translateX(-50%);
+                font-size:14px; letter-spacing:3px; color:#ffd60a; font-weight:800;
+                text-shadow:0 1px 6px #000; display:none; }
+
+    /* ---------- Menus ---------- */
+    .menu { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+            justify-content:center; gap:26px; background:
+            radial-gradient(1200px 700px at 50% 20%, #1a1030 0%, #0a0a14 55%, #050507 100%);
+            z-index:10; }
+    .menu h1 { font-family:'Arial Black',sans-serif; font-size:clamp(48px, 9vw, 110px);
+               font-weight:900; letter-spacing:6px; color:#fff; text-align:center; line-height:.95;
+               text-shadow:0 0 30px rgba(255,59,48,.55), 0 0 80px rgba(120,0,255,.4); }
+    .menu h1 .red { color:#ff3b30; }
+    .menu .sub { color:#9aa0a6; letter-spacing:6px; font-weight:800; font-size:14px; }
+    .menu button { pointer-events:auto; cursor:pointer; border:2px solid #ff3b30;
+        background:rgba(255,59,48,.12); color:#fff; font-size:22px; font-weight:900;
+        letter-spacing:5px; padding:18px 64px; border-radius:8px; transition:.15s;
+        font-family:inherit; text-transform:uppercase; }
+    .menu button:hover { background:#ff3b30; box-shadow:0 0 40px rgba(255,59,48,.7);
+                          transform:scale(1.04); }
+    .menu .controls { color:#c8ccd4; font-size:13px; line-height:2; letter-spacing:2px;
+        background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.12); border-radius:10px;
+        padding:22px 34px; text-align:left; font-weight:700; }
+    .menu .controls b { color:#ffb020; }
+    #dead h1 { color:#ff3b30; text-shadow:0 0 30px rgba(255,59,48,.8); }
+    #dead .stats { color:#fff; font-size:18px; letter-spacing:3px; font-weight:800; }
+    #pausehint { position:fixed; top:10px; left:50%; transform:translateX(-50%); color:#666;
+                 font-size:11px; letter-spacing:2px; display:none; z-index:5; font-family:sans-serif; }
+  </style>
+  <script type="module" crossorigin src="./assets/index-BNcaHj32.js"></script>
+</head>
+<body>
+  <div id="game"></div>
+
+  <div id="hud">
+    <div id="crosshair">
+      <div class="arm h a-l"></div><div class="arm h a-r"></div>
+      <div class="arm v a-t"></div><div class="arm v a-b"></div>
+      <div class="dot"></div>
+    </div>
+    <div id="reddot"></div>
+    <div id="hitmarker"><div class="hm-l"></div><div class="hm-r"></div></div>
+    <div id="wavebox"><div class="w">WAVE</div><div class="n" id="waveNum">1</div><div class="k" id="waveKills">0 KILLS</div></div>
+    <div id="scorebox"><div class="s" id="scoreVal">0</div><div class="l">SCORE</div></div>
+    <div id="healthbar">
+      <div class="label">HEALTH</div>
+      <div class="bar"><div class="fill" id="hpFill"></div></div>
+    </div>
+    <div id="ammo"><div class="wpname" id="wpName">ASSAULT RIFLE</div><div class="mag"><span id="magAmmo">30</span><span> / </span><span id="reserveAmmo">90</span></div></div>
+    <div id="weaponwheel"></div>
+    <div id="centermsg"></div>
+    <div id="interact"></div>
+    <div id="dmgflash"></div>
+    <div id="lowhp"></div>
+  </div>
+
+  <div class="menu" id="startmenu">
+    <h1>ARENA <span class="red">BLAST</span></h1>
+    <div class="sub">HORDE SHOOTER // WEBGL</div>
+    <button id="startBtn">DEPLOY</button>
+    <div class="controls">
+      <b>WASD</b> move &nbsp;·&nbsp; <b>SHIFT</b> sprint &nbsp;·&nbsp; <b>SPACE</b> jump &nbsp;·&nbsp; <b>C</b> crouch<br>
+      <b>MOUSE</b> look &nbsp;·&nbsp; <b>LMB</b> fire &nbsp;·&nbsp; <b>RMB</b> aim down sights<br>
+      <b>R</b> reload &nbsp;·&nbsp; <b>1 / 2 / 3</b> weapons &nbsp;·&nbsp; <b>ESC</b> pause<br>
+      Weapons: <b>AR/SMG</b> · <b>SHOTGUN</b> · <b>MARKSMAN</b> (red dot)
+    </div>
+  </div>
+
+  <div class="menu" id="dead" style="display:none">
+    <h1>YOU DIED</h1>
+    <div class="stats" id="deadStats"></div>
+    <button id="restartBtn">REDEPLOY</button>
+  </div>
+
+  <div id="pausehint">ESC — RESUME</div>
+
+</body>
+</html>

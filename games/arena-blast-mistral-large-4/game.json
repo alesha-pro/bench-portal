@@ -1,0 +1,12 @@
+{
+  "slug": "arena-blast-mistral-large-4",
+  "title": "ARENA BLAST",
+  "category": "shooters",
+  "model": "Mistral Large 4",
+  "version": "October 6, 2026 · OMP solo",
+  "summary": "A procedural arena FPS with three weapons, ADS and escalating enemy waves.",
+  "description": "Built by mistralai/mistral-large-4-0 through OpenRouter in OMP using a single agent, without subagents. Features an assault rifle, shotgun and marksman rifle, recoil, weapon inertia, procedural WebGL shaders, particles and synthesized audio. OpenRouter recorded 5,301,816 tokens across requests, including 4,333,056 cached input tokens and 84,479 output tokens, with $1.0042 in API charges. Production build and headless browser smoke tests completed; synthetic pointer-lock mouse-look was not fully verified. Original generated gameplay code, packaged with relative asset URLs for this portal.",
+  "accent": "#ff3b30",
+  "tags": ["FPS", "Three.js", "WebGL", "GLSL", "OMP", "Solo"],
+  "cover": "cover.png"
+}
