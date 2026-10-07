@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Golden Hour</title>
+  <meta name="description" content="Wave survival on an unfinished rooftop at golden hour. Three.js.">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="game" aria-label="Game view"></canvas>
+
+  <div id="hud" class="hidden" aria-hidden="true">
+    <div id="damage"></div>
+    <div id="low-hp"></div>
+
+    <div id="crosshair" class="crosshair">
+      <i></i><i></i><i></i><i></i><b></b>
+    </div>
+    <div id="ads-scope"></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+
+    <div id="top">
+      <div class="wave"><span class="label">WAVE</span><span id="wave-num">0</span></div>
+      <div id="wave-sub"></div>
+      <div class="rush"><div id="rush-fill"></div></div>
+    </div>
+
+    <div id="top-right">
+      <div id="score">0</div>
+      <div id="kills">KILLS 0</div>
+      <div id="combo"></div>
+      <div id="feed"></div>
+    </div>
+
+    <div id="banner" role="status">
+      <h2 id="banner-title"></h2>
+      <p id="banner-sub"></p>
+    </div>
+
+    <div id="bottom-left">
+      <div class="hp"><div id="hp-fill"></div></div>
+      <div class="hp-row"><span id="hp-num">100</span><span id="cover-state">EXPOSED</span></div>
+    </div>
+
+    <div id="bottom-right">
+      <div id="ammo"><span id="ammo-mag">30</span><span id="ammo-res">/ 210</span></div>
+      <div id="reload-state"></div>
+    </div>
+  </div>
+
+  <div id="overlay" class="overlay">
+    <section id="panel-menu" class="panel">
+      <p class="kicker">Wave survival &middot; top floor &middot; 19:42</p>
+      <h1>GOLDEN<br>HOUR</h1>
+      <p class="lede">Hold the roof until the sun is gone. Rushers come for you, gunners pin you behind cover, and heavies walk through fire until their plates come off.</p>
+      <button id="start-btn" class="btn">Start</button>
+      <dl class="controls">
+        <div><dt>Move</dt><dd>W A S D</dd></div>
+        <div><dt>Sprint</dt><dd>Shift</dd></div>
+        <div><dt>Slide</dt><dd>C / Ctrl (sprint first)</dd></div>
+        <div><dt>Jump, mantle</dt><dd>Space</dd></div>
+        <div><dt>Lean</dt><dd>Q / E</dd></div>
+        <div><dt>Fire</dt><dd>Left mouse</dd></div>
+        <div><dt>Aim down sights</dt><dd>Right mouse (slide, then aim)</dd></div>
+        <div><dt>Reload</dt><dd>R</dd></div>
+      </dl>
+      <p class="fine">Audio and graphics are procedural. Use headphones, and a GPU with WebGL2.</p>
+    </section>
+
+    <section id="panel-pause" class="panel hidden">
+      <p class="kicker">Paused</p>
+      <h1>HOLD<br>POSITION</h1>
+      <p class="lede">The mouse was released. Click to take it back.</p>
+      <button id="resume-btn" class="btn">Resume</button>
+    </section>
+
+    <section id="panel-dead" class="panel hidden">
+      <p class="kicker">Down</p>
+      <h1>YOU<br>FELL</h1>
+      <div id="dead-stats" class="stats"></div>
+      <button id="restart-btn" class="btn">Go again</button>
+    </section>
+
+    <div id="boot-error" class="boot-error"></div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

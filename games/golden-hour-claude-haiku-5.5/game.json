@@ -1,0 +1,12 @@
+{
+  "slug": "golden-hour-claude-haiku-5.5",
+  "title": "GOLDEN HOUR",
+  "category": "shooters",
+  "model": "Claude Haiku 5.5",
+  "version": "October 7, 2026 · Claude Code",
+  "summary": "Wave survival on the unfinished top floor of a high-rise at sunset.",
+  "description": "A first-person wave-survival shooter built by Claude Haiku 5.5 in Claude Code at max effort, from the same high-rise shooter prompt as the Highrise Protocol builds. Fight rushers, gunners and armoured heavies with a full-auto rifle; sprint, slide, mantle, lean and aim down sights, and regenerate health behind cover. Three.js with no build step: textures, sounds and music are generated at startup, with a sun shadow map, volumetric light shafts, bloom and filmic grading. The session log records 215 requests in about 58 minutes, including two subagents: 107.3M input tokens (106.1M of them cache reads) and 1.25M output tokens, roughly $7.85 at API list prices. Packaged unchanged with relative asset URLs.",
+  "accent": "#f2a03d",
+  "tags": ["FPS", "Three.js", "WebGL", "Claude Code", "Procedural Audio"],
+  "cover": "cover.webp"
+}
