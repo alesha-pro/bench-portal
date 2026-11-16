@@ -1,0 +1,1578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUNSTRIKE</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#05070f;}
+  body{display:flex;align-items:center;justify-content:center;}
+  canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   SUNSTRIKE — self-running pixel-art fighter jet scene
+   Everything procedural. 20 s seamless loop. ?t=SECONDS freezes.
+   ============================================================ */
+
+const LOOP = 20.0;
+let BH = 300;                        // buffer height (px), recomputed per window in layout()
+const params = new URLSearchParams(location.search);
+const frozenT = (params.has('t') && isFinite(parseFloat(params.get('t')))) ? parseFloat(params.get('t')) : null;
+
+const canvas = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:false, alpha:false, powerPreference:'high-performance' });
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.autoClear = false;
+const gl = renderer.getContext();
+
+/* ---------------- deterministic RNG ---------------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+const rng = mulberry32(1337);
+
+/* ---------------- tileable 3D value-noise texture ----------------
+   64^3, lattice 8^3 wrapped -> seamless fbm octaves.
+   All world noise periods below divide 1200 (the 20 s scroll distance). */
+function makeNoiseTexture(){
+  const N=128, L=8, data=new Uint8Array(N*N*N);
+  const lat=new Float32Array(L*L*L);
+  for(let i=0;i<lat.length;i++) lat[i]=rng();
+  const sm=x=>x*x*x*(x*(x*6-15)+10); // quintic fade: C2 smooth, no lattice creases
+  const at=(x,y,z)=>lat[((z%L+L)%L)*L*L+((y%L+L)%L)*L+((x%L+L)%L)];
+  let p=0;
+  for(let z=0;z<N;z++){ const fz=z/N*L, z0=Math.floor(fz), dz=sm(fz-z0);
+    for(let y=0;y<N;y++){ const fy=y/N*L, y0=Math.floor(fy), dy=sm(fy-y0);
+      for(let x=0;x<N;x++){ const fx=x/N*L, x0=Math.floor(fx), dx=sm(fx-x0);
+        const c00=at(x0,y0,z0)+(at(x0+1,y0,z0)-at(x0,y0,z0))*dx;
+        const c10=at(x0,y0+1,z0)+(at(x0+1,y0+1,z0)-at(x0,y0+1,z0))*dx;
+        const c01=at(x0,y0,z0+1)+(at(x0+1,y0,z0+1)-at(x0,y0,z0+1))*dx;
+        const c11=at(x0,y0+1,z0+1)+(at(x0+1,y0+1,z0+1)-at(x0,y0+1,z0+1))*dx;
+        const c0=c00+(c10-c00)*dy, c1=c01+(c11-c01)*dy;
+        data[p++]=Math.round((c0+(c1-c0)*dz)*255);
+      }}}
+  const tex=new THREE.Data3DTexture(data,N,N,N);
+  tex.format=THREE.RedFormat; tex.type=THREE.UnsignedByteType;
+  tex.minFilter=THREE.LinearFilter; tex.magFilter=THREE.LinearFilter;
+  tex.wrapS=tex.wrapT=tex.wrapR=THREE.RepeatWrapping;
+  tex.unpackAlignment=1; tex.needsUpdate=true;
+  return tex;
+}
+const noiseTex = makeNoiseTexture();
+
+/* ---------------- sun & sky (single scattering, Rayleigh+Mie) ---------------- */
+const SUN_ELEV = 12*Math.PI/180;
+const sunDir = new THREE.Vector3(0.55, Math.sin(SUN_ELEV), -0.78).normalize();
+const SUN_COLOR = new THREE.Vector3(1.0,0.74,0.45);
+
+const SKY_GLSL = /* glsl */`
+uniform vec3 uSunDir;
+const vec3 betaR = vec3(5.8e-6, 13.5e-6, 33.1e-6);
+const float betaM = 5e-5;
+const float HR = 8000.0;
+const float HM = 1500.0;
+vec3 skyColor(vec3 rd, vec3 sd){
+  float up = rd.y;
+  if(up < 0.005){
+    // below horizon: bright peach haze floor blending into the cloud sea
+    vec3 hz = vec3(0.92,0.62,0.42);
+    return hz*1.05;
+  }
+  float mu = dot(rd, sd);
+  float phR = 0.0596831*(1.0+mu*mu);
+  float g = 0.76;
+  float phM = 0.0795775*(1.0-g*g)/pow(max(1.0+g*g-2.0*g*mu,1e-4),1.5);
+  float tmax = 60000.0/max(up,0.06);
+  float dt = tmax/5.0;
+  vec3 sumR = vec3(0.0), sumM = vec3(0.0);
+  float odR = 0.0, odM = 0.0;
+  float sunMu = max(sd.y, 0.02);
+  for(int i=0;i<5;i++){
+    float t = (float(i)+0.5)*dt;
+    float h = max(up*t, 0.0);
+    float dR = exp(-h/HR), dM = exp(-h/HM);
+    odR += dR*dt; odM += dM*dt;
+    float sR = HR*dR/sunMu, sM = HM*dM/sunMu;
+    vec3 att = exp(-(betaR*(odR+sR) + betaM*1.15*(odM+sM)));
+    sumR += dR*att*dt;
+    sumM += dM*att*dt;
+  }
+  vec3 col = 8.0*(betaR*phR*sumR + betaM*phM*sumM);
+  col *= vec3(1.0, 0.92, 1.05); // kill the green cast of pure Rayleigh+Mie sunset
+  // fake multiple scattering: single scattering extinguishes to a dark line at the horizon
+  col = mix(col, vec3(0.97,0.65,0.44), smoothstep(0.18,0.005,up)*0.9);
+  // deepen the zenith toward blue (single scattering alone reads grey at 27 deg)
+  col = mix(col, col*vec3(0.72,0.88,1.38), smoothstep(0.10,0.45,up));
+  // sun disk with reddened limb
+  vec3 diskTint = exp(-(betaR*HR + betaM*1.15*HM)/sunMu);
+  float disk = smoothstep(0.999955, 0.999985, mu);
+  col += disk*diskTint*1400.0;
+  return col;
+}
+`;
+
+/* JS mirror of skyColor for ambient/haze uniforms (same math) */
+function skyColorJS(rd, sd){
+  const up = rd.y;
+  if(up < 0.005) return [0.92*1.05,0.62*1.05,0.42*1.05];
+  const mu = rd.dot(sd);
+  const phR = 0.0596831*(1+mu*mu);
+  const g=0.76;
+  const phM = 0.0795775*(1-g*g)/Math.pow(Math.max(1+g*g-2*g*mu,1e-4),1.5);
+  const tmax = 60000/Math.max(up,0.06), dt=tmax/5;
+  let sR=[0,0,0], sM=[0,0,0], odR=0, odM=0;
+  const sunMu=Math.max(sd.y,0.02);
+  const bR=[5.8e-6,13.5e-6,33.1e-6], bM=5e-5;
+  for(let i=0;i<5;i++){
+    const t=(i+0.5)*dt, h=Math.max(up*t,0);
+    const dR=Math.exp(-h/8000), dM=Math.exp(-h/1500);
+    odR+=dR*dt; odM+=dM*dt;
+    const sr=8000*dR/sunMu, sm=1500*dM/sunMu;
+    const att=[0,1,2].map(k=>Math.exp(-(bR[k]*(odR+sr)+bM*1.15*(odM+sm))));
+    for(let k=0;k<3;k++){ sR[k]+=dR*att[k]*dt; sM[k]+=dM*att[k]*dt; }
+  }
+  const tint=[1.0,0.92,1.05];
+  const hw=0.9*Math.min(1,Math.max(0,(0.18-up)/(0.18-0.005)));
+  const fl=[0.97,0.65,0.44];
+  const zw=Math.min(1,Math.max(0,(up-0.10)/0.35)); const zs=zw*zw*(3-2*zw);
+  const zf=[0.72,0.88,1.38];
+  return [0,1,2].map(k=>((8*(bR[k]*phR*sR[k]+bM*phM*sM[k])*tint[k])*(1-hw)+fl[k]*hw)*(1+(zf[k]-1)*zs));
+}
+const V3=(x,y,z)=>new THREE.Vector3(x,y,z);
+const ambUp = skyColorJS(V3(0,1,0), sunDir);
+const ambHz = skyColorJS(V3(0.45,0.12,-0.9).normalize(), sunDir);
+const hazeC = skyColorJS(V3(0.25,0.05,-1).normalize(), sunDir);
+// scale into pleasant ambient ranges
+const skyAmb = new THREE.Vector3(ambUp[0]*0.30+0.10, ambUp[1]*0.30+0.12, ambUp[2]*0.34+0.20);
+const skyWarm = new THREE.Vector3(Math.min(ambHz[0],1.4)*0.35, Math.min(ambHz[1],1.2)*0.28, Math.min(ambHz[2],1.0)*0.24);
+// aerial-perspective inscatter ≈ blend of horizon warmth and zenith ambient (not pure sun-horizon)
+const hazeCol = new THREE.Vector3(
+  Math.min(hazeC[0],1.6)*0.85*0.65 + skyAmb.x*0.55,
+  Math.min(hazeC[1],1.3)*0.78*0.65 + skyAmb.y*0.55,
+  Math.min(hazeC[2],1.1)*0.72*0.65 + skyAmb.z*0.55);
+
+/* ---------------- shared uniforms (single source of truth) ---------------- */
+const U = {
+  uTime:{value:0}, uScroll:{value:0},
+  uSunDir:{value:sunDir}, uSunColor:{value:SUN_COLOR},
+  uCamPos:{value:new THREE.Vector3()}, uCamRight:{value:new THREE.Vector3(1,0,0)},
+  uCamUp:{value:new THREE.Vector3(0,1,0)}, uCamFwd:{value:new THREE.Vector3(0,0,-1)},
+  uTanFov:{value:1}, uAspect:{value:1}, uNear:{value:0.5}, uFar:{value:4000},
+  uSteps:{value:48}, uLightSteps:{value:6},
+  uNoise:{value:noiseTex},
+  uSkyAmb:{value:skyAmb}, uSkyWarm:{value:skyWarm}, uHaze:{value:hazeCol},
+  uJetPos:{value:new THREE.Vector3()}, uJetDir:{value:new THREE.Vector3(0,0,-1)},
+  uJetShadow:{value:1}, uWake:{value:0}, uWakePos:{value:new THREE.Vector3()},
+  uHasJet:{value:1}, uJetTex:{value:null}, uJetDepth:{value:null},
+  uBurn:{value:0}, uGlint:{value:1},
+  uDbgCloud:{value:1}, uDbgFog:{value:1},
+  uDbgWisp:{value:1}, uDbgCir:{value:1}, uDbgTower:{value:1}, uDbgSea:{value:1},
+  uDbgView:{value:0},
+};
+
+/* ---------------- fullscreen quad helper ---------------- */
+const quadCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const quadGeo = new THREE.PlaneGeometry(2,2);
+const quadMesh = new THREE.Mesh(quadGeo, null);
+quadMesh.frustumCulled = false;
+const quadScene = new THREE.Scene();
+quadScene.add(quadMesh);
+const QUAD_VS = /* glsl */`
+varying vec2 vUv;
+void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+`;
+function quadMat(fs, extra){
+  return new THREE.ShaderMaterial({
+    uniforms: Object.assign({}, U, extra||{}),
+    vertexShader: QUAD_VS, fragmentShader: fs,
+    depthTest:false, depthWrite:false,
+  });
+}
+function runPass(mat, target){
+  quadMesh.material = mat;
+  renderer.setRenderTarget(target);
+  renderer.render(quadScene, quadCam);
+}
+
+/* ============================================================
+   CLOUDS — raymarched at buffer resolution
+   ============================================================ */
+const CLOUD_COMMON = /* glsl */`
+uniform highp sampler3D uNoise;
+uniform float uTime, uScroll, uSteps, uLightSteps;
+uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd;
+uniform float uTanFov, uAspect;
+uniform vec3 uSunColor, uSkyAmb, uSkyWarm, uHaze;
+uniform vec3 uJetPos, uJetDir, uWakePos;
+uniform float uJetShadow, uWake;
+uniform float uDbgCloud, uDbgFog, uDbgWisp, uDbgCir, uDbgTower, uDbgSea, uDbgView;
+${SKY_GLSL}
+float n3(vec3 p){ return texture(uNoise, p).r; }
+float bayerJ(vec2 p){
+  ivec2 q = ivec2(mod(p, 4.0));
+  int m[16] = int[16](0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
+  return (float(m[q.y*4+q.x]) + 0.5)/16.0;
+}
+float seaTop(vec2 xz){
+  return 8.0 + 40.0*n3(vec3(xz/7200.0, 0.13)) + 18.0*n3(vec3(xz/3600.0, 0.51)) + 8.0*n3(vec3(xz/1800.0, 0.71)) + 4.0*n3(vec3(xz/900.0, 0.37));
+}
+float towerMask(vec2 xz){
+  float a = n3(vec3(xz/7200.0, 0.31));
+  float b = n3(vec3(xz/3600.0, 0.77));
+  return smoothstep(0.48, 0.70, a*0.62 + b*0.38);
+}
+float towerH(vec2 xz){
+  return 220.0 + 520.0*n3(vec3(xz/7200.0, 0.91));
+}
+float erosion(vec3 q){
+  return n3(q/7200.0)*0.50 + n3(q/3600.0 + vec3(0.37,0.11,0.73))*0.30 + n3(q/1800.0 + vec3(0.71,0.53,0.19))*0.20;
+}
+float density(vec3 p){
+  vec3 q = p + vec3(0.0, 0.0, uScroll);
+  // wake swirl behind the jet (punch-through wisp)
+  if(uWake > 0.001){
+    vec3 d = p - uWakePos;
+    float r = length(d);
+    float infl = uWake * exp(-r/70.0);
+    float ang = infl*2.4;
+    float ca = cos(ang), sa = sin(ang);
+    q.xz += mat2(ca,-sa,sa,ca) * d.xz - d.xz;
+    q += infl * vec3(0.0, 14.0, 0.0) * n3(q/900.0);
+  }
+  float crown0 = smoothstep(90.0, 300.0, q.y);
+  q.xz += (vec2(n3(q/1800.0), n3(q/1800.0+vec3(0.37,0.11,0.73)))-0.5)*40.0*crown0; // soft crown wander
+  vec2 xz = q.xz + vec2(q.y*0.05, -q.y*0.03); // gentle tower lean with height
+  float st = seaTop(xz);
+  float er = erosion(q);
+  float sea = clamp((st - q.y)/26.0, 0.0, 1.0) * smoothstep(-175.0, -95.0, q.y) * uDbgSea;
+  float m = towerMask(xz) * (0.55+0.9*n3(vec3(xz/3600.0,0.5))) * uDbgTower;
+  float H = towerH(xz);
+  float tower = m * clamp((H - q.y)/105.0, 0.0, 1.0) * smoothstep(st-40.0, st+35.0, q.y);
+  tower *= (0.75 + 0.4*n3(q/3600.0)) * (1.0 - 0.22*smoothstep(st+60.0, H, q.y));
+  tower *= 0.90 + 0.18*n3(q/1800.0 + vec3(0.11,0.43,0.29)); // soft billows on the silhouette
+  tower *= 1.0 + 0.5*(1.0-smoothstep(st+20.0, st+140.0, q.y)); // wide flat cumulus base
+  tower *= mix(1.0, 0.90+0.2*n3(q/1800.0+vec3(0.19,0.63,0.41)), crown0); // soft lumpy crown
+  // clear-air cylinder around the chase camera: towers dissolve before reaching the lens
+  tower *= smoothstep(240.0, 760.0, length(p.xz - uCamPos.xz));
+  float d = max(sea*0.95, tower*1.2);
+  // sharp coverage with noise-wandered threshold → cauliflower outlines, no marginal veil
+  float edge = 0.04*n3(q/3600.0 + vec3(0.31,0.77,0.13));
+  // detail erosion only at the edges, low amplitude: smooth billows inside
+  d = smoothstep(0.05+edge, 0.35+edge, d*1.6 - er*0.35*(1.0-smoothstep(0.25,0.65,d)));
+  d *= 0.94 + 0.08*n3(q/1800.0 + vec3(0.53,0.29,0.71)); // gentle large-scale variation only
+  // near wisps streaking past the lens (double-speed parallax, stretched)
+  vec3 q2 = p + vec3(0.0, 0.0, uScroll*2.0);
+  float wisp = smoothstep(0.70, 0.90, n3(vec3(q2.x/3600.0, q2.y/720.0, q2.z/7200.0)));
+  float near = exp(-length(p - uCamPos)/160.0);
+  d += wisp * near * 0.035 * uDbgWisp;
+  // high cirrus veil: rare wisps, never a sheet
+  float cir = smoothstep(0.78, 0.92, n3(vec3(q.x/7200.0, q.y/1800.0, q.z/7200.0) + vec3(0.13,0.41,0.67)));
+  d += cir * smoothstep(280.0, 380.0, q.y) * (1.0-smoothstep(430.0, 560.0, q.y)) * 0.008 * uDbgCir;
+  return d * uDbgCloud;
+}
+float jetShadowTau(vec3 s){
+  // soft capsule occlusion of sunlight by the jet
+  vec3 w = s - uJetPos;
+  float along = clamp(dot(w, uJetDir), -12.0, 12.0);
+  vec3 cp = uJetPos + uJetDir*along;
+  float dist = length(s - cp);
+  float occ = 1.0 - smoothstep(3.0, 11.0, dist);
+  return occ * uJetShadow;
+}
+float hg(float mu, float g){
+  float g2 = g*g;
+  return (1.0-g2)/(4.0*3.14159265*pow(max(1.0+g2-2.0*g*mu,1e-4),1.5));
+}
+// optical depth toward the sun through the volume (crepuscular shadowing)
+float cloudTau(vec3 p){
+  // 4-node Gauss-Legendre over [0,60] toward the sun: smooth in p (no march
+  // kinks -> no mach-band onion shells), deterministic, no jitter, 4 evals.
+  float tau = 0.0;
+  const float gn0 = 0.3399810436, gn1 = 0.8611363116;
+  const float gw0 = 0.6521451549, gw1 = 0.3478548451;
+  float t0 = 30.0*(1.0-gn1), t1 = 30.0*(1.0-gn0), t2 = 30.0*(1.0+gn0), t3 = 30.0*(1.0+gn1);
+  float w0 = 30.0*gw1, w1 = 30.0*gw0;
+  vec3 q0 = p+uSunDir*t0, q1 = p+uSunDir*t1, q2 = p+uSunDir*t2, q3 = p+uSunDir*t3;
+  tau += w0*(density(q0)+density(q3)) + w1*(density(q1)+density(q2));
+  tau += 0.16*(w0*(jetShadowTau(q0)+jetShadowTau(q3)) + w1*(jetShadowTau(q1)+jetShadowTau(q2)));
+  return tau;
+}
+`;
+
+/* careful ray construction: view ray = right*x + up*y + fwd*1 (fwd is unit forward) */
+const RAY_FN = /* glsl */`
+vec3 makeRay(vec2 uv){
+  vec2 ndc = uv*2.0-1.0;
+  return normalize(uCamRight*(ndc.x*uAspect*uTanFov) + uCamUp*(ndc.y*uTanFov) + uCamFwd);
+}
+`;
+
+const CLOUD_FS = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uJetTex;
+uniform sampler2D uJetDepth;
+uniform float uHasJet, uNear, uFar;
+${CLOUD_COMMON}
+${RAY_FN}
+void main(){
+  vec2 uv = vUv;
+  vec3 rd = makeRay(uv);
+  vec3 ro = uCamPos;
+  if(uDbgView > 0.5){
+    vec3 pp = ro + rd*600.0;
+    if(uDbgView > 1.5){
+      vec3 qq = pp + vec3(0.0, 0.0, uScroll);
+      gl_FragColor = vec4(vec3(towerMask(qq.xz)), 1.0); return;
+    }
+    gl_FragColor = vec4(vec3(density(pp)), 1.0); return;
+  }
+  float mu = dot(rd, uSunDir);
+  float phase = 0.60*hg(mu, 0.8) + 0.40*hg(mu, -0.3);
+  vec3 sunLin = uSunColor*10.0;
+
+  // jet solid depth along this ray
+  float tJet = 1e9;
+  if(uHasJet > 0.5){
+    float d = texture(uJetDepth, uv).x;
+    if(d < 0.9999){
+      float zn = d*2.0-1.0;
+      float viewZ = (2.0*uNear*uFar)/(uFar+uNear - zn*(uFar-uNear));
+      float cosA = max(dot(rd, uCamFwd), 0.2);
+      tJet = viewZ/cosA;
+    }
+  }
+  float tEnd = min(tJet, 2600.0);
+  float dt = tEnd/uSteps;
+  float T = 1.0;
+  float tOpaque = -1.0;
+  float t = 0.0;
+  float wsum = 0.0;
+  float dPrev = density(ro);
+  for(int i=0;i<64;i++){
+    if(float(i) >= uSteps || t > tEnd || T < 0.012) break;
+    vec3 p = ro + rd*t;
+    float dM = density(p + rd*(dt*0.5));
+    float dN = density(p + rd*dt);
+    float d = (dPrev + 4.0*dM + dN)/6.0; // Simpson: smooth optical depth, no march rings
+    dPrev = dN;
+    if(d > 0.004){
+      float stepT = exp(-d*0.05*dt);
+      float w = T*(1.0-stepT);
+      wsum += w*(t + dt*0.5);
+      T *= stepT;
+      if(tOpaque < 0.0 && T < 0.35) tOpaque = t;
+    }
+    t += dt;
+  }
+  // single smooth shading evaluation at the transmittance-weighted mean depth:
+  // no per-step lighting lattice -> no contour/mach bands on the surfaces
+  float covered = 1.0 - T;
+  // transmittance-weighted mean depth: smooth in screen position (no march
+  // lattice kinks -> no contour/mach bands); backlit bodies read lavender,
+  // sun-facing rims and the cloud sea carry the cream-gold
+  float tSurf = wsum/max(covered, 1e-4);
+  vec3 pS = ro + rd*tSurf;
+  float tau = cloudTau(pS);
+  float beer = exp(-tau*0.05*1.4);
+  float powder = 1.0 - exp(-tau*0.05*3.2);
+  float sunAmt = beer*mix(1.0, powder, 0.5);
+  float hf = clamp(pS.y/420.0, 0.0, 1.0);
+  vec3 amb = mix(uSkyWarm*0.35, uSkyAmb*1.6, 0.55+0.45*hf);
+  amb *= 0.96 + 0.06*n3(pS/1800.0 + vec3(0.31,0.17,0.53));
+  vec3 S = sunLin*phase*sunAmt + amb*0.7 + sunLin*0.008*(0.5+0.5*hf);
+  // background: jet color if the ray hit the jet, else sky
+  vec3 bg;
+  if(tJet < 1e8){
+    bg = texture(uJetTex, uv).rgb;
+  } else {
+    bg = skyColor(rd, uSunDir);
+  }
+  vec3 col = S*covered + T*bg;
+  // aerial perspective: haze inscatter shadow-marched toward the sun → crepuscular shafts in clear air
+  float fogDist = (tJet < 1e8) ? tJet : (tOpaque > 0.0 ? tOpaque : tEnd);
+  float fog = 1.0 - exp(-fogDist*0.00030);
+  float sh1 = exp(-cloudTau(ro + rd*min(tEnd*0.35, 700.0))*0.05*1.4);
+  float sh2 = exp(-cloudTau(ro + rd*min(tEnd*0.70, 1400.0))*0.05*1.4);
+  float shaft = 0.5*(sh1+sh2);
+  col = mix(col, uHaze*(0.10 + 1.1*shaft), fog*0.18*uDbgFog);
+  gl_FragColor = vec4(col, 1.0-T); // alpha = cloud coverage, so post can skip dither on clouds
+}
+`;
+
+/* reduced-step variant for the environment cubemap (sky + clouds only) */
+const ENV_FS = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform float uFace;
+${CLOUD_COMMON}
+${RAY_FN}
+vec3 faceRay(vec2 uv, float f){
+  vec2 ndc = uv*2.0-1.0;
+  vec3 r;
+  if(f<0.5)      r = vec3( 1.0, -ndc.y, -ndc.x);
+  else if(f<1.5) r = vec3(-1.0, -ndc.y,  ndc.x);
+  else if(f<2.5) r = vec3( ndc.x,  1.0,  ndc.y);
+  else if(f<3.5) r = vec3( ndc.x, -1.0, -ndc.y);
+  else if(f<4.5) r = vec3( ndc.x, -ndc.y,  1.0);
+  else           r = vec3(-ndc.x, -ndc.y, -1.0);
+  return normalize(r);
+}
+void main(){
+  vec3 rd = faceRay(vUv, uFace);
+  vec3 ro = uCamPos;
+  float mu = dot(rd, uSunDir);
+  float phase = 0.60*hg(mu,0.8) + 0.40*hg(mu,-0.3);
+  vec3 sunLin = uSunColor*10.0;
+  float tEnd = 2400.0;
+  float dt = tEnd/uSteps;
+  vec3 L = vec3(0.0); float T = 1.0;
+  float t = 0.5*dt;
+  for(int i=0;i<24;i++){
+    if(float(i) >= uSteps || T < 0.03) break;
+    vec3 p = ro + rd*t;
+    float d = density(p);
+    if(d > 0.01){
+      float sigma = d*0.05;
+      float ldt = 90.0/uLightSteps;
+      float tau = 0.0;
+      for(int j=0;j<4;j++){
+        if(float(j) >= uLightSteps) break;
+        tau += density(p + uSunDir*((float(j)+0.5)*ldt))*ldt;
+      }
+      float beer = exp(-tau*0.05*1.4);
+      float powder = 1.0-exp(-tau*0.05*3.2);
+      float hf = clamp(p.y/420.0,0.0,1.0);
+      vec3 amb = mix(uSkyWarm*0.35, uSkyAmb*1.6, 0.55+0.45*hf);
+      amb *= 0.96 + 0.06*n3(p/1800.0 + vec3(0.31,0.17,0.53));
+      vec3 S = sunLin*phase*beer*mix(1.0,powder,0.4) + amb*0.7 + sunLin*0.008*(0.5+0.5*hf);
+      float st = exp(-sigma*dt);
+      L += T*S*(1.0-st); T *= st;
+    }
+    t += dt;
+  }
+  vec3 col = L + T*skyColor(rd, uSunDir);
+  float sh1 = exp(-cloudTau(ro + rd*700.0)*0.05*1.4);
+  float sh2 = exp(-cloudTau(ro + rd*1400.0)*0.05*1.4);
+  col = mix(col, uHaze*(0.10 + 1.1*0.5*(sh1+sh2)), (1.0-exp(-tEnd*0.00030))*0.18);
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const cloudMat = quadMat(CLOUD_FS);
+const envMat = quadMat(ENV_FS, { uFace:{value:0} });
+
+/* ============================================================
+   POST — bloom, shimmer, streak, ACES, grade, Bayer quantize
+   ============================================================ */
+const BRIGHT_FS = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+void main(){
+  vec3 c = texture(uSrc, vUv).rgb;
+  float l = max(max(c.r,c.g),c.b);
+  float knee = 1.5;
+  float w = max(l-knee, 0.0)/max(l, 1e-4);
+  vec3 b = c*w;
+  // pixel-star cross taps so hot glints bloom into a small star
+  b += texture(uSrc, vUv + vec2( 2.0,0.0)*uTexel).rgb*0.22*w;
+  b += texture(uSrc, vUv + vec2(-2.0,0.0)*uTexel).rgb*0.22*w;
+  b += texture(uSrc, vUv + vec2(0.0, 2.0)*uTexel).rgb*0.22*w;
+  b += texture(uSrc, vUv + vec2(0.0,-2.0)*uTexel).rgb*0.22*w;
+  b += texture(uSrc, vUv + vec2( 4.0,0.0)*uTexel).rgb*0.10*w;
+  b += texture(uSrc, vUv + vec2(-4.0,0.0)*uTexel).rgb*0.10*w;
+  b += texture(uSrc, vUv + vec2(0.0, 4.0)*uTexel).rgb*0.10*w;
+  b += texture(uSrc, vUv + vec2(0.0,-4.0)*uTexel).rgb*0.10*w;
+  gl_FragColor = vec4(b, 1.0);
+}
+`;
+const BLUR_FS = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2 uDir;
+void main(){
+  vec3 c = texture(uSrc, vUv).rgb*0.227027;
+  c += texture(uSrc, vUv + uDir*1.0).rgb*0.1945946;
+  c += texture(uSrc, vUv - uDir*1.0).rgb*0.1945946;
+  c += texture(uSrc, vUv + uDir*2.0).rgb*0.1216216;
+  c += texture(uSrc, vUv - uDir*2.0).rgb*0.1216216;
+  c += texture(uSrc, vUv + uDir*3.0).rgb*0.054054;
+  c += texture(uSrc, vUv - uDir*3.0).rgb*0.054054;
+  c += texture(uSrc, vUv + uDir*4.0).rgb*0.016216;
+  c += texture(uSrc, vUv - uDir*4.0).rgb*0.016216;
+  gl_FragColor = vec4(c, 1.0);
+}
+`;
+const COMPOSITE_FS = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScene, uBloom, uJet;
+uniform float uQuant;
+uniform vec2 uTexel;
+uniform float uTime, uBurn, uStreak, uAspect;
+uniform vec2 uNoz0, uNoz1;
+uniform float uNozOn;
+float hash21(vec2 p){
+  p = fract(p*vec2(123.34, 456.21));
+  p += dot(p, p+45.32);
+  return fract(p.x*p.y);
+}
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*(3.0-2.0*f);
+  float a = hash21(i), b = hash21(i+vec2(1,0)), c = hash21(i+vec2(0,1)), d = hash21(i+vec2(1,1));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+}
+float bayer4(vec2 p){
+  ivec2 q = ivec2(mod(p, 4.0));
+  int m[16] = int[16](0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
+  return float(m[q.y*4+q.x])/16.0;
+}
+void main(){
+  vec2 uv = vUv;
+  // heat shimmer behind the nozzles: quantized pixel offsets
+  if(uNozOn > 0.5 && uBurn > 0.01){
+    for(int i=0;i<2;i++){
+      vec2 np = (i==0) ? uNoz0 : uNoz1;
+      vec2 dv = (uv-np)*vec2(uAspect,1.0);
+      float r = length(dv);
+      float infl = (1.0-smoothstep(0.0, 0.085, r))*uBurn;
+      if(infl > 0.001){
+        float n1 = vnoise(uv*vec2(90.0,60.0) + vec2(0.0, uTime*26.0));
+        float n2 = vnoise(uv*vec2(70.0,95.0) - vec2(uTime*21.0, 0.0));
+        vec2 off = vec2(n1-0.5, n2-0.5)*infl*7.0;
+        uv += floor(off)*uTexel;
+      }
+    }
+  }
+  vec3 c = texture(uScene, uv).rgb;
+  // quick pixel-level motion streak on the close pass
+  if(uStreak > 0.01){
+    float jm = texture(uJet, vUv).a;   // jet stays crisp: streak only the clouds behind it
+    if(jm < 0.5){
+      vec2 sdir = vec2(1.0, 0.12)*uTexel;
+      float pk = mod(floor(gl_FragCoord.x)+floor(gl_FragCoord.y), 2.0);
+      vec3 s1 = texture(uScene, uv + sdir*(1.0+pk)).rgb;
+      vec3 s2 = texture(uScene, uv - sdir*(2.0-pk)).rgb;
+      c = mix(c, (s1+s2)*0.5, uStreak*0.5);
+    }
+  }
+  c += texture(uBloom, vUv).rgb*0.55;
+  c = aces(c*1.05);
+  // gentle teal-shadow / gold-highlight grade
+  float luma = dot(c, vec3(0.2126,0.7152,0.0722));
+  c = mix(c, c*vec3(0.86,1.04,1.12), (1.0-luma)*0.30);
+  c *= mix(vec3(1.0), vec3(1.09,1.00,0.86), luma*0.55);
+  c = mix(vec3(dot(c, vec3(0.3333))), c, 1.22); // saturation: deep blues, rich golds
+  // faint vignette
+  vec2 vc = vUv-0.5;
+  c *= 1.0 - 0.20*pow(dot(vc,vc)*2.0, 1.5);
+  // sRGB then screen-locked 4x4 Bayer dither, 32 levels per channel (last step)
+  c = pow(max(c, vec3(0.0)), vec3(1.0/2.2));
+  float b = bayer4(gl_FragCoord.xy);
+  vec3 cq = floor(c*31.0 + b)/31.0;
+  // clouds stay smooth: dither/quantize only sky and jet pixels (alpha = cloud coverage)
+  float cm = smoothstep(0.004, 0.06, texture(uScene, vUv).a);
+  c = mix(cq, c, max(cm, 1.0-uQuant));
+  gl_FragColor = vec4(c, 1.0);
+}
+`;
+const UPSCALE_FS = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uPix, uSmooth, uCloud;
+void main(){
+  // pixel layer (jet + dithered sky) nearest; cloud layer linear-upscaled and smooth
+  float cm = smoothstep(0.004, 0.06, texture(uCloud, vUv).a);
+  vec3 c = mix(texture(uPix, vUv).rgb, texture(uSmooth, vUv).rgb, cm);
+  gl_FragColor = vec4(c, 1.0);
+}
+`;
+const MERGE_FS = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uCloud, uJet;
+void main(){
+  vec4 cl = texture(uCloud, vUv);
+  vec4 jt = texture(uJet, vUv);
+  float cm = smoothstep(0.004, 0.06, cl.a);
+  float ja = clamp(jt.a, 0.0, 1.0);
+  vec3 over = jt.rgb + cl.rgb*(1.0-ja); // jet/vapor over sky (jet rt cleared to black)
+  gl_FragColor = vec4(mix(over, cl.rgb, cm), cl.a);
+}
+`;
+
+const brightMat = quadMat(BRIGHT_FS, { uSrc:{value:null}, uTexel:{value:new THREE.Vector2()} });
+const blurMat   = quadMat(BLUR_FS,   { uSrc:{value:null}, uDir:{value:new THREE.Vector2()} });
+const compMat   = quadMat(COMPOSITE_FS, {
+  uScene:{value:null}, uBloom:{value:null}, uJet:{value:null}, uTexel:{value:new THREE.Vector2()},
+  uStreak:{value:0}, uNoz0:{value:new THREE.Vector2(-1,-1)}, uNoz1:{value:new THREE.Vector2(-1,-1)},
+  uNozOn:{value:0}, uQuant:{value:1},
+});
+const compSmoothMat = quadMat(COMPOSITE_FS, {
+  uScene:{value:null}, uBloom:{value:null}, uJet:{value:null}, uTexel:{value:new THREE.Vector2()},
+  uStreak:{value:0}, uNoz0:{value:new THREE.Vector2(-1,-1)}, uNoz1:{value:new THREE.Vector2(-1,-1)},
+  uNozOn:{value:0}, uQuant:{value:0},
+});
+const mergeMat = quadMat(MERGE_FS, { uCloud:{value:null}, uJet:{value:null} });
+const upMat = quadMat(UPSCALE_FS, { uPix:{value:null}, uSmooth:{value:null}, uCloud:{value:null} });
+
+/* ============================================================
+   RENDER TARGETS
+   ============================================================ */
+let BW = 533, SCALE = 3, CW = 960, CH = 540;
+const rtOpts = { type:THREE.HalfFloatType, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false };
+const linOpts = { type:THREE.HalfFloatType, minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, depthBuffer:false };
+let jetRT, sceneRT, bloomA, bloomB, ldrRT, cloudRT, bloomC, bloomD, postRT;
+function makeTargets(){
+  if(jetRT){ jetRT.dispose(); sceneRT.dispose(); bloomA.dispose(); bloomB.dispose(); ldrRT.dispose(); cloudRT.dispose(); bloomC.dispose(); bloomD.dispose(); postRT.dispose(); }
+  const dt = new THREE.DepthTexture(BW, BH);
+  dt.type = THREE.UnsignedIntType; dt.format = THREE.DepthFormat;
+  jetRT = new THREE.WebGLRenderTarget(BW, BH, { type:THREE.HalfFloatType, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthTexture:dt, depthBuffer:true });
+  sceneRT = new THREE.WebGLRenderTarget(BW, BH, rtOpts);
+  bloomA = new THREE.WebGLRenderTarget(BW, BH, linOpts);
+  bloomB = new THREE.WebGLRenderTarget(BW, BH, linOpts);
+  ldrRT = new THREE.WebGLRenderTarget(BW, BH, { type:THREE.UnsignedByteType, minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter, depthBuffer:false });
+  // clouds march at half screen resolution, linear-upscaled: no temporal boil
+  cloudRT = new THREE.WebGLRenderTarget(CW, CH, linOpts);
+  bloomC = new THREE.WebGLRenderTarget(CW, CH, linOpts);
+  bloomD = new THREE.WebGLRenderTarget(CW, CH, linOpts);
+  postRT = new THREE.WebGLRenderTarget(CW, CH, { type:THREE.UnsignedByteType, minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, depthBuffer:false });
+  cloudMat.uniforms.uJetTex.value = jetRT.texture;
+  cloudMat.uniforms.uJetDepth.value = jetRT.depthTexture;
+  mergeMat.uniforms.uCloud.value = cloudRT.texture;
+  mergeMat.uniforms.uJet.value = jetRT.texture;
+  compMat.uniforms.uScene.value = sceneRT.texture;
+  compMat.uniforms.uJet.value = jetRT.texture;
+  compMat.uniforms.uBloom.value = bloomA.texture;
+  compMat.uniforms.uTexel.value.set(1/BW, 1/BH);
+  compSmoothMat.uniforms.uScene.value = cloudRT.texture;
+  compSmoothMat.uniforms.uJet.value = jetRT.texture;
+  compSmoothMat.uniforms.uTexel.value.set(1/CW, 1/CH);
+  brightMat.uniforms.uTexel.value.set(1/BW, 1/BH);
+  upMat.uniforms.uPix.value = ldrRT.texture;
+  upMat.uniforms.uSmooth.value = postRT.texture;
+  upMat.uniforms.uCloud.value = cloudRT.texture;
+}
+
+const cubeRT = new THREE.WebGLCubeRenderTarget(48, { type:THREE.HalfFloatType, generateMipmaps:true, minFilter:THREE.LinearMipmapLinearFilter, magFilter:THREE.LinearFilter });
+
+/* ============================================================
+   THE JET — generic modern fighter, all code
+   ============================================================ */
+const jetScene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, 16/9, 0.5, 4000);
+
+const sunLight = new THREE.DirectionalLight(0xffd9a6, 2.8);
+sunLight.position.copy(sunDir).multiplyScalar(1000);
+jetScene.add(sunLight);
+const hemi = new THREE.HemisphereLight(0x7d95c9, 0xe8b48a, 0.55);
+jetScene.add(hemi);
+
+/* ---- procedural panel texture (albedo + roughness) ---- */
+function panelTextures(){
+  const S=512;
+  const cv=document.createElement('canvas'); cv.width=cv.height=S;
+  const c=cv.getContext('2d');
+  const rv=document.createElement('canvas'); rv.width=rv.height=S;
+  const r=rv.getContext('2d');
+  c.fillStyle='#6e7885'; c.fillRect(0,0,S,S);
+  r.fillStyle='#5a5a5a'; r.fillRect(0,0,S,S);   // roughness ~0.35
+  const rnd=mulberry32(99);
+  const P=8, cell=S/P;
+  for(let gy=0;gy<P;gy++)for(let gx=0;gx<P;gx++){
+    const v=(rnd()-0.5)*14;
+    c.fillStyle=`rgb(${110+v|0},${120+v|0},${133+v|0})`;
+    c.fillRect(gx*cell+1,gy*cell+1,cell-2,cell-2);
+    const rr=90+(rnd()-0.5)*36;
+    r.fillStyle=`rgb(${rr|0},${rr|0},${rr|0})`;
+    r.fillRect(gx*cell+1,gy*cell+1,cell-2,cell-2);
+  }
+  // panel lines
+  c.strokeStyle='rgba(24,28,35,0.65)'; c.lineWidth=2;
+  r.strokeStyle='rgba(150,150,150,0.8)'; r.lineWidth=2;
+  for(let i=0;i<=P;i++){
+    c.beginPath(); c.moveTo(i*cell,0); c.lineTo(i*cell,S); c.stroke();
+    c.beginPath(); c.moveTo(0,i*cell); c.lineTo(S,i*cell); c.stroke();
+    r.beginPath(); r.moveTo(i*cell,0); r.lineTo(i*cell,S); r.stroke();
+    r.beginPath(); r.moveTo(0,i*cell); r.lineTo(S,i*cell); r.stroke();
+  }
+  // a few irregular access panels
+  for(let i=0;i<14;i++){
+    const x=rnd()*S, y=rnd()*S, w=18+rnd()*40, h=12+rnd()*26;
+    c.strokeStyle='rgba(28,32,40,0.5)'; c.strokeRect(x,y,w,h);
+    r.strokeStyle='rgba(140,140,140,0.6)'; r.strokeRect(x,y,w,h);
+  }
+  // rivet dots along lines
+  for(let i=0;i<=P;i++)for(let k=0;k<S;k+=16){
+    c.fillStyle='rgba(30,34,42,0.55)';
+    c.beginPath(); c.arc(i*cell+4, k+8, 1.4, 0, 7); c.fill();
+    c.beginPath(); c.arc(k+8, i*cell+4, 1.4, 0, 7); c.fill();
+    c.fillStyle='rgba(190,200,215,0.20)';
+    c.beginPath(); c.arc(i*cell+3.4, k+7.4, 0.7, 0, 7); c.fill();
+  }
+  // weathering streaks
+  for(let i=0;i<420;i++){
+    const x=rnd()*S, y=rnd()*S, len=4+rnd()*22;
+    c.strokeStyle=`rgba(${rnd()<0.5?'40,44,52':'150,158,170'},${0.03+rnd()*0.05})`;
+    c.lineWidth=0.8+rnd()*1.6;
+    c.beginPath(); c.moveTo(x,y); c.lineTo(x+(rnd()-0.5)*3, y+len); c.stroke();
+  }
+  // darker anti-glare panel ahead of canopy (top of fuselage, v ~0.20-0.36)
+  const ag = c.createLinearGradient(0, S*0.20, 0, S*0.36);
+  ag.addColorStop(0,'rgba(38,42,48,0)');
+  ag.addColorStop(0.25,'rgba(38,42,48,0.92)');
+  ag.addColorStop(0.8,'rgba(38,42,48,0.92)');
+  ag.addColorStop(1,'rgba(38,42,48,0)');
+  c.fillStyle=ag;
+  c.fillRect(0, S*0.20, S*0.16, S*0.16);
+  c.fillRect(S*0.84, S*0.20, S*0.16, S*0.16);
+  r.fillStyle='rgba(190,190,190,0.9)';
+  r.fillRect(0, S*0.21, S*0.15, S*0.14);
+  r.fillRect(S*0.85, S*0.21, S*0.15, S*0.14);
+  const map=new THREE.CanvasTexture(cv);
+  map.colorSpace=THREE.SRGBColorSpace;
+  map.wrapS=map.wrapT=THREE.RepeatWrapping;
+  map.anisotropy=4;
+  const rough=new THREE.CanvasTexture(rv);
+  rough.wrapS=rough.wrapT=THREE.RepeatWrapping;
+  return {map, rough};
+}
+const panels = panelTextures();
+
+/* ---- shared PBR paint with custom env reflection / rim / bounce / glint ---- */
+function paintMaterial(opts){
+  const m = new THREE.MeshStandardMaterial(Object.assign({
+    color:0x8b96a4, metalness:0.6, roughness:0.35,
+    map:panels.map, roughnessMap:panels.rough, bumpMap:panels.map, bumpScale:0.012,
+  }, opts||{}));
+  m.onBeforeCompile = (sh)=>{
+    sh.uniforms.uEnvCube = { value: cubeRT.texture };
+    sh.uniforms.uSunDirW = U.uSunDir;
+    sh.uniforms.uSunColW = U.uSunColor;
+    sh.uniforms.uGlint = U.uGlint;
+    sh.uniforms.uSkyAmbW = U.uSkyAmb;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform samplerCube uEnvCube;
+        uniform vec3 uSunDirW, uSunColW, uSkyAmbW;
+        uniform float uGlint;`)
+      .replace('#include <opaque_fragment>', `
+        {
+          vec3 Vw = normalize(vViewPosition);
+          vec3 Nw = normalize(normal);
+          // world-space reflection of the live sky+cloud cubemap
+          vec3 Rw = reflect(-Vw, Nw);
+          float rough = clamp(roughnessFactor, 0.04, 1.0);
+          vec3 env = textureLod(uEnvCube, Rw, rough*5.0).rgb;
+          float fres = pow(1.0-max(dot(Nw,Vw),0.0), 3.0);
+          outgoingLight += env*(0.10 + 0.40*fres)*vec3(0.55,0.60,0.68)*mix(vec3(1.0), uSunColW, 0.22);
+          // hot sun glint -> HDR spike -> pixel star
+          float glint = pow(max(dot(Rw, uSunDirW), 0.0), 120.0);
+          outgoingLight += uSunColW*glint*60.0*uGlint;
+          // broad anisotropic streak along the fuselage sides that sweeps as the jet rolls
+          float sideMask = 1.0-smoothstep(0.35, 0.7, abs(Nw.y));
+          outgoingLight += uSunColW*pow(max(dot(Rw, uSunDirW), 0.0), 24.0)*10.0*uGlint*sideMask;
+          // warm rim on edges facing away from the sun
+          float away = max(-dot(Nw, uSunDirW), 0.0);
+          outgoingLight += uSunColW*pow(1.0-max(dot(Nw,Vw),0.0), 3.5)*away*0.50;
+          // warm bounce from cloud tops onto the belly
+          float belly = max(-Nw.y, 0.0);
+          outgoingLight += vec3(0.95,0.66,0.42)*belly*0.60;
+        }
+        #include <opaque_fragment>`);
+  };
+  return m;
+}
+const paint = paintMaterial();
+const paintDark = paintMaterial({ color:0x555c66, roughness:0.5, metalness:0.5 });
+const canopyMat = new THREE.MeshStandardMaterial({ color:0xffb648, metalness:1.0, roughness:0.07, envMapIntensity:1.0 });
+canopyMat.onBeforeCompile = (sh)=>{
+  sh.uniforms.uEnvCube = { value: cubeRT.texture };
+  sh.uniforms.uSunDirW = U.uSunDir;
+  sh.uniforms.uSunColW = U.uSunColor;
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', `#include <common>
+      uniform samplerCube uEnvCube; uniform vec3 uSunDirW, uSunColW;`)
+    .replace('#include <opaque_fragment>', `
+      {
+        vec3 Vw = normalize(vViewPosition);
+        vec3 Nw = normalize(normal);
+        vec3 Rw = reflect(-Vw, Nw);
+        vec3 env = textureLod(uEnvCube, Rw, 0.6).rgb;
+        env *= vec3(1.0,0.82,0.55); // gold-tinted glass
+        float fres = pow(1.0-max(dot(Nw,Vw),0.0), 2.0);
+        outgoingLight += env*(0.30+0.60*fres);
+        float glint = pow(max(dot(Rw, uSunDirW),0.0), 420.0);
+        outgoingLight += uSunColW*glint*60.0;
+      }
+      #include <opaque_fragment>`);
+};
+const nozzleMat = paintMaterial({ color:0x3c4046, metalness:0.85, roughness:0.42 });
+const missileMat = paintMaterial({ color:0xb9bec4, metalness:0.4, roughness:0.45 });
+
+/* ---- fuselage loft with chined cross-sections ---- */
+function fuselageGeometry(){
+  // stations: z, halfWidth, height
+  const st = [
+    [-11.0, 0.03, 0.03], [-9.6, 0.34, 0.28], [-7.6, 0.72, 0.58],
+    [-5.2, 1.10, 0.90], [-3.2, 1.42, 1.12], [-1.0, 1.66, 1.28],
+    [ 1.6, 1.88, 1.34], [ 4.0, 1.84, 1.30], [ 7.0, 1.62, 1.16],
+    [ 9.6, 1.50, 1.02], [11.0, 1.38, 0.92],
+  ];
+  // 12-point chined ring, starting at top, going clockwise (x+, then down)
+  function ring(w,h){
+    return [
+      [0, h], [0.42*w, 0.92*h], [0.78*w, 0.62*h], [w, 0.10*h],
+      [0.86*w, -0.42*h], [0.52*w, -0.86*h], [0, -0.96*h],
+      [-0.52*w, -0.86*h], [-0.86*w, -0.42*h], [-w, 0.10*h],
+      [-0.78*w, 0.62*h], [-0.42*w, 0.92*h],
+    ];
+  }
+  const pos=[], uv=[], idx=[];
+  const R=12;
+  for(let i=0;i<st.length;i++){
+    const [z,w,h]=st[i];
+    const pts=ring(w,h);
+    for(let j=0;j<R;j++){
+      pos.push(pts[j][0], pts[j][1], z);
+      uv.push(j/R, (z+11)/22);
+    }
+  }
+  for(let i=0;i<st.length-1;i++)for(let j=0;j<R;j++){
+    const a=i*R+j, b=i*R+(j+1)%R, c=(i+1)*R+j, d=(i+1)*R+(j+1)%R;
+    idx.push(a,c,b, b,c,d);
+  }
+  // nose cap
+  const tip=pos.length/3;
+  pos.push(0,0,-11.35); uv.push(0.5,0);
+  for(let j=0;j<R;j++) idx.push(tip, j, (j+1)%R);
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv,2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+function remapUV(g, sx, sz){
+  const p=g.attributes.position, uv=g.attributes.uv;
+  for(let i=0;i<p.count;i++){
+    uv.setXY(i, p.getX(i)/sx+0.5, p.getZ(i)/sz+0.5);
+  }
+  uv.needsUpdate=true;
+}
+
+/* wing planform: cranked delta (right side), extruded thin */
+function wingGeometry(){
+  const s=new THREE.Shape();
+  s.moveTo(1.55, -1.2);     // root LE (x, z-as-y)
+  s.lineTo(3.30, 2.1);      // crank
+  s.lineTo(6.85, 5.55);     // tip LE
+  s.lineTo(6.70, 6.45);     // tip TE
+  s.lineTo(1.70, 7.30);     // root TE
+  s.closePath();
+  const g=new THREE.ExtrudeGeometry(s, { depth:0.16, bevelEnabled:true, bevelThickness:0.05, bevelSize:0.06, bevelSegments:1 });
+  g.rotateX(Math.PI/2);     // shape y -> world z, extrude -> -y... fix below
+  g.translate(0, 0.02, 0);
+  remapUV(g, 14, 14);
+  g.computeVertexNormals();
+  return g;
+}
+function mirrorGeo(g){
+  const m=g.clone();
+  m.scale(-1,1,1);
+  // flip winding (indexed or non-indexed)
+  if(m.index){
+    const idx=m.index.array;
+    for(let i=0;i<idx.length;i+=3){ const t=idx[i+1]; idx[i+1]=idx[i+2]; idx[i+2]=t; }
+    m.index.needsUpdate=true;
+  } else {
+    for(const name of ['position','normal','uv']){
+      const a=m.attributes[name]; if(!a) continue;
+      const arr=a.array, n=a.itemSize;
+      for(let i=0;i<a.count;i+=3){
+        for(let k=0;k<n;k++){
+          const t=arr[(i+1)*n+k]; arr[(i+1)*n+k]=arr[(i+2)*n+k]; arr[(i+2)*n+k]=t;
+        }
+      }
+      a.needsUpdate=true;
+    }
+  }
+  m.computeVertexNormals();
+  return m;
+}
+function finGeometry(){
+  const s=new THREE.Shape();
+  s.moveTo(0,0); s.lineTo(2.9,0.55); s.lineTo(3.5,2.75); s.lineTo(2.35,2.95); s.lineTo(0.45,0.9); s.closePath();
+  const g=new THREE.ExtrudeGeometry(s,{depth:0.12,bevelEnabled:true,bevelThickness:0.03,bevelSize:0.04,bevelSegments:1});
+  remapUV(g,8,8);
+  g.computeVertexNormals();
+  return g;
+}
+function stabGeometry(){
+  const s=new THREE.Shape();
+  s.moveTo(0,0); s.lineTo(2.5,1.15); s.lineTo(2.35,2.15); s.lineTo(0.15,2.5); s.closePath();
+  const g=new THREE.ExtrudeGeometry(s,{depth:0.12,bevelEnabled:true,bevelThickness:0.04,bevelSize:0.05,bevelSegments:1});
+  g.rotateX(Math.PI/2);
+  remapUV(g,9,9);
+  g.computeVertexNormals();
+  return g;
+}
+function slabGeometry(w,l,t){
+  const g=new THREE.BoxGeometry(w,t,l);
+  remapUV(g,10,10);
+  return g;
+}
+
+const jet = new THREE.Group();
+jetScene.add(jet);
+
+const fuselage = new THREE.Mesh(fuselageGeometry(), paint);
+jet.add(fuselage);
+
+/* LERX strakes */
+function lerxGeometry(){
+  const s=new THREE.Shape();
+  s.moveTo(1.1,-4.6); s.lineTo(2.75,0.6); s.lineTo(1.75,1.9); s.lineTo(1.35,-1.0); s.closePath();
+  const g=new THREE.ExtrudeGeometry(s,{depth:0.14,bevelEnabled:true,bevelThickness:0.05,bevelSize:0.08,bevelSegments:1});
+  g.rotateX(Math.PI/2);
+  g.translate(0,0.28,0);
+  remapUV(g,12,12);
+  g.computeVertexNormals();
+  return g;
+}
+const lerxR=new THREE.Mesh(lerxGeometry(),paint); jet.add(lerxR);
+const lerxL=new THREE.Mesh(mirrorGeo(lerxGeometry()),paint); jet.add(lerxL);
+
+/* wings */
+const wingRGeo=wingGeometry();
+const wingR=new THREE.Mesh(wingRGeo,paint); wingR.position.set(0,0.05,0); jet.add(wingR);
+const wingL=new THREE.Mesh(mirrorGeo(wingRGeo),paint); wingL.position.set(0,0.05,0); jet.add(wingL);
+
+/* ailerons (outboard trailing edge, move with roll) */
+const aileronGeo=slabGeometry(2.0,0.85,0.10);
+const ailR=new THREE.Group(); ailR.position.set(5.55,0.05,6.35);
+const ailRm=new THREE.Mesh(aileronGeo,paint); ailRm.position.set(0,0,0.42); ailR.add(ailRm); jet.add(ailR);
+const ailL=new THREE.Group(); ailL.position.set(-5.55,0.05,6.35);
+const ailLm=new THREE.Mesh(aileronGeo,paint); ailLm.position.set(0,0,0.42); ailL.add(ailLm); jet.add(ailL);
+
+/* stabilators (all-moving tailplanes, pitch) */
+const stabGeo=stabGeometry();
+const stabR=new THREE.Group(); stabR.position.set(1.55,-0.12,7.35);
+const stabRm=new THREE.Mesh(stabGeo,paint); stabR.add(stabRm); jet.add(stabR);
+const stabL=new THREE.Group(); stabL.position.set(-1.55,-0.12,7.35);
+const stabLm=new THREE.Mesh(mirrorGeo(stabGeo),paint); stabL.add(stabLm); jet.add(stabL);
+
+/* twin canted vertical tails */
+const finGeo=finGeometry();
+const finR=new THREE.Group(); finR.position.set(1.15,0.72,5.6);
+finR.rotation.z=-22*Math.PI/180;
+const finRm=new THREE.Mesh(finGeo,paint); finRm.rotation.y=-Math.PI/2; finR.add(finRm); jet.add(finR);
+const finL=new THREE.Group(); finL.position.set(-1.15,0.72,5.6);
+finL.rotation.z=22*Math.PI/180;
+const finLm=new THREE.Mesh(mirrorGeo(finGeo),paint); finLm.rotation.y=Math.PI/2; finL.add(finLm); jet.add(finL);
+
+/* tail number "27" — the only marking */
+function tailNumberTexture(){
+  const cv=document.createElement('canvas'); cv.width=128; cv.height=64;
+  const c=cv.getContext('2d');
+  c.clearRect(0,0,128,64);
+  c.fillStyle='#383d44';
+  c.font='bold 46px "Arial Black", Arial, sans-serif';
+  c.textAlign='center'; c.textBaseline='middle';
+  c.fillText('27',64,34);
+  const t=new THREE.CanvasTexture(cv);
+  t.colorSpace=THREE.SRGBColorSpace;
+  return t;
+}
+const numTex=tailNumberTexture();
+const numMat=new THREE.MeshStandardMaterial({ map:numTex, transparent:true, metalness:0.3, roughness:0.6, polygonOffset:true, polygonOffsetFactor:-2 });
+function addTailNumber(finGroup, side){
+  const p=new THREE.Mesh(new THREE.PlaneGeometry(1.05,0.52), numMat);
+  // fin local: after rotation.y=+-90, fin plane lies in group YZ; place on outer face
+  p.position.set(side*0.02, 1.95, 1.75);
+  p.rotation.y=side*Math.PI/2;
+  finGroup.add(p);
+}
+addTailNumber(finR, 1);
+addTailNumber(finL, -1);
+
+/* bubble canopy + frame */
+const canopy=new THREE.Mesh(new THREE.SphereGeometry(1,20,12), canopyMat);
+canopy.scale.set(0.86,0.78,2.55);
+canopy.position.set(0,1.02,-2.35);
+jet.add(canopy);
+const frameMat=paintDark;
+const sill=new THREE.Mesh(new THREE.BoxGeometry(1.78,0.10,5.0),frameMat);
+sill.position.set(0,0.98,-2.35); jet.add(sill);
+const bow=new THREE.Mesh(new THREE.TorusGeometry(0.80,0.055,6,14,Math.PI),frameMat);
+bow.position.set(0,1.02,-3.9); bow.rotation.x=0; bow.scale.set(1,0.95,1);
+jet.add(bow);
+const arch=new THREE.Mesh(new THREE.TorusGeometry(0.82,0.05,6,14,Math.PI),frameMat);
+arch.position.set(0,1.02,-1.1); arch.scale.set(1,0.9,1); jet.add(arch);
+
+/* refuelling probe bump (right of nose, ahead of canopy) */
+const probe=new THREE.Mesh(new THREE.SphereGeometry(1,10,8),paintDark);
+probe.scale.set(0.16,0.14,0.85);
+probe.position.set(0.92,0.62,-5.1);
+jet.add(probe);
+
+/* twin engine nacelles + petal nozzles */
+function nacelleGeometry(){
+  const g=new THREE.CylinderGeometry(0.72,0.78,7.2,12,1);
+  g.rotateX(Math.PI/2);
+  remapUV(g,8,8);
+  return g;
+}
+const nacR=new THREE.Mesh(nacelleGeometry(),paintDark); nacR.position.set(0.86,-0.28,7.4); jet.add(nacR);
+const nacL=new THREE.Mesh(nacelleGeometry(),paintDark); nacL.position.set(-0.86,-0.28,7.4); jet.add(nacL);
+function petalNozzle(){
+  const g=new THREE.CylinderGeometry(0.60,0.68,1.5,14,1,true);
+  const p=g.attributes.position;
+  for(let i=0;i<p.count;i++){
+    const x=p.getX(i), z=p.getZ(i);
+    const ang=Math.atan2(z,x);
+    const k=1+0.06*Math.cos(ang*7);
+    p.setX(i,x*k); p.setZ(i,z*k);
+  }
+  g.rotateX(Math.PI/2);
+  g.computeVertexNormals();
+  remapUV(g,6,6);
+  return g;
+}
+const nozR=new THREE.Mesh(petalNozzle(),nozzleMat); nozR.position.set(0.86,-0.28,11.5); jet.add(nozR);
+const nozL=new THREE.Mesh(petalNozzle(),nozzleMat); nozL.position.set(-0.86,-0.28,11.5); jet.add(nozL);
+
+/* afterburner: emissive disk + HDR cone with shock diamonds */
+const burnDiskMat=new THREE.ShaderMaterial({
+  uniforms:{ uBurn:U.uBurn, uTime:U.uTime },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    varying vec2 vUv; uniform float uBurn,uTime;
+    void main(){
+      float r=length(vUv-0.5)*2.0;
+      float core=1.0-smoothstep(0.0,1.0,r);
+      vec3 col=mix(vec3(1.0,0.32,0.08),vec3(0.40,0.60,1.0),pow(core,2.0));
+      float flick=0.92+0.08*sin(uTime*57.0+r*9.0);
+      gl_FragColor=vec4(col*(4.0+10.0*core)*uBurn*flick, uBurn);
+    }`,
+  transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide,
+});
+const diskGeo=new THREE.CircleGeometry(0.56,14);
+const diskR=new THREE.Mesh(diskGeo,burnDiskMat); diskR.position.set(0.86,-0.28,12.28); jet.add(diskR);
+const diskL=new THREE.Mesh(diskGeo,burnDiskMat); diskL.position.set(-0.86,-0.28,12.28); jet.add(diskL);
+
+const burnConeMat=new THREE.ShaderMaterial({
+  uniforms:{ uBurn:U.uBurn, uTime:U.uTime },
+  vertexShader:`varying vec2 vUv; varying vec3 vP; void main(){ vUv=uv; vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    varying vec2 vUv; varying vec3 vP;
+    uniform float uBurn,uTime;
+    void main(){
+      float ax=vUv.y;                 // 0 at nozzle -> 1 at tail
+      float rad=abs(vUv.x-0.5)*2.0;
+      float body=(1.0-smoothstep(0.0,1.0,ax))*(1.0-smoothstep(0.35,1.0,rad));
+      float diamonds=pow(0.5+0.5*sin(ax*34.0-uTime*46.0),3.0)*(1.0-ax);
+      vec3 hot=mix(vec3(1.0,0.30,0.06),vec3(0.25,0.45,1.0),smoothstep(0.0,0.85,ax));
+      hot+=vec3(1.0,0.85,0.6)*diamonds*1.6;
+      float a=body*uBurn;
+      gl_FragColor=vec4(hot*(3.5+7.0*diamonds)*a, a);
+    }`,
+  transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide,
+});
+function coneGeo(){
+  const g=new THREE.CylinderGeometry(0.30,0.80,7.6,12,6,true);
+  g.rotateX(Math.PI/2);
+  g.translate(0,0,3.8);
+  return g;
+}
+const coneR=new THREE.Mesh(coneGeo(),burnConeMat); coneR.position.set(0.86,-0.28,12.3); jet.add(coneR);
+const coneL=new THREE.Mesh(coneGeo(),burnConeMat); coneL.position.set(-0.86,-0.28,12.3); jet.add(coneL);
+
+/* wingtip missiles + pylons */
+function missile(){
+  const grp=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.13,0.13,2.5,8),missileMat);
+  body.rotation.x=Math.PI/2; grp.add(body);
+  const nose=new THREE.Mesh(new THREE.ConeGeometry(0.13,0.5,8),paintDark);
+  nose.rotation.x=-Math.PI/2; nose.position.z=-1.5; grp.add(nose);
+  for(let k=0;k<4;k++){
+    const f=new THREE.Mesh(new THREE.BoxGeometry(0.02,0.30,0.34),missileMat);
+    const a=k*Math.PI/2;
+    f.position.set(Math.cos(a)*0.16, Math.sin(a)*0.16, 1.05);
+    f.rotation.z=a;
+    grp.add(f);
+  }
+  return grp;
+}
+const misR=missile(); misR.position.set(6.95,-0.10,5.9); jet.add(misR);
+const misL=missile(); misL.position.set(-6.95,-0.10,5.9); jet.add(misL);
+const pylonGeo=new THREE.BoxGeometry(0.16,0.55,1.3);
+for(const sx of [1,-1]) for(const px of [3.1,4.6]){
+  const p=new THREE.Mesh(pylonGeo,paintDark);
+  p.position.set(sx*px,-0.32,3.9);
+  jet.add(p);
+}
+
+/* ---- vapor: wingtip vortex ribbons (analytic trail from the loop) ---- */
+const TRAIL_N=42;
+function makeTrail(){
+  const g=new THREE.BufferGeometry();
+  const pos=new Float32Array(TRAIL_N*2*3);
+  const uv=new Float32Array(TRAIL_N*2*2);
+  const idx=[];
+  for(let i=0;i<TRAIL_N-1;i++){
+    const a=i*2,b=i*2+1,c=i*2+2,d=i*2+3;
+    idx.push(a,b,c, b,d,c);
+  }
+  for(let i=0;i<TRAIL_N;i++){ uv[i*4]=0; uv[i*4+1]=i/(TRAIL_N-1); uv[i*4+2]=1; uv[i*4+3]=i/(TRAIL_N-1); }
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+  g.setIndex(idx);
+  return g;
+}
+const trailMat=new THREE.ShaderMaterial({
+  uniforms:{ uSunDirW:U.uSunDir, uSunColW:U.uSunColor, uSkyAmbW:U.uSkyAmb, uVapor:{value:0.3} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    varying vec2 vUv;
+    uniform vec3 uSunDirW,uSunColW,uSkyAmbW; uniform float uVapor;
+    void main(){
+      float fade=pow(1.0-vUv.y,1.6);
+      float edge=1.0-abs(vUv.x-0.5)*2.0;
+      float a=fade*edge*uVapor*1.0;
+      vec3 lit=mix(uSkyAmbW*0.9, uSunColW*1.5, 0.55);
+      gl_FragColor=vec4(lit*a, a);
+    }`,
+  transparent:true, depthWrite:false, side:THREE.DoubleSide,
+});
+const trailRGeo=makeTrail(), trailLGeo=makeTrail();
+const trailR=new THREE.Mesh(trailRGeo,trailMat); trailR.frustumCulled=false; jetScene.add(trailR);
+const trailL=new THREE.Mesh(trailLGeo,trailMat); trailL.frustumCulled=false; jetScene.add(trailL);
+
+/* condensation sheet over the wings at high G */
+const condenseMat=new THREE.ShaderMaterial({
+  uniforms:{ uAmt:{value:0}, uTime:U.uTime, uSunDirW:U.uSunDir, uSunColW:U.uSunColor, uSkyAmbW:U.uSkyAmb },
+  vertexShader:`varying vec3 vN,vW; void main(){ vN=normalize(normalMatrix*normal); vec4 w=modelMatrix*vec4(position,1.0); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }`,
+  fragmentShader:`
+    precision highp float;
+    varying vec3 vN,vW;
+    uniform float uAmt,uTime; uniform vec3 uSunDirW,uSunColW,uSkyAmbW;
+    void main(){
+      float fres=pow(1.0-abs(dot(normalize(vN),vec3(0.0,0.0,1.0))),1.5);
+      float n=sin(vW.x*2.1+uTime*3.0)*sin(vW.z*1.7-uTime*2.2);
+      float a=uAmt*(0.18+0.22*fres)*(0.7+0.3*n);
+      vec3 lit=mix(uSkyAmbW, uSunColW*1.4, 0.5);
+      gl_FragColor=vec4(lit*a, a);
+    }`,
+  transparent:true, depthWrite:false, side:THREE.DoubleSide,
+});
+const condense=new THREE.Mesh(new THREE.SphereGeometry(1,16,10),condenseMat);
+condense.scale.set(6.4,0.35,3.6);
+condense.position.set(0,0.45,3.2);
+jet.add(condense);
+
+/* short vapor cone burst at peak speed */
+const vconeMat=new THREE.ShaderMaterial({
+  uniforms:{ uAmt:{value:0}, uSunColW:U.uSunColor, uSkyAmbW:U.uSkyAmb },
+  vertexShader:`varying vec3 vN; varying vec2 vUv; void main(){ vN=normalize(normalMatrix*normal); vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    varying vec3 vN; varying vec2 vUv;
+    uniform float uAmt; uniform vec3 uSunColW,uSkyAmbW;
+    void main(){
+      float rim=pow(abs(dot(normalize(vN),vec3(0.0,0.0,1.0))),2.0);
+      float band=smoothstep(0.0,0.25,vUv.y)*(1.0-smoothstep(0.55,1.0,vUv.y));
+      float a=uAmt*band*(0.2+0.5*rim);
+      vec3 lit=mix(uSkyAmbW,uSunColW*1.3,0.5);
+      gl_FragColor=vec4(lit*a,a);
+    }`,
+  transparent:true, depthWrite:false, side:THREE.DoubleSide,
+});
+const vcone=new THREE.Mesh(new THREE.CylinderGeometry(4.6,2.2,2.6,18,1,true),vconeMat);
+vcone.rotation.x=Math.PI/2;
+vcone.position.set(0,0.2,-0.5);
+jet.add(vcone);
+
+/* ============================================================
+   FLIGHT — closed spline, everything a function of t
+   ============================================================ */
+const keys=[
+  V3(-38,108,-95), // 0 s  upper-left between towers, readable size
+  V3(-30,104,-75), // 2 s
+  V3(-20, 98,-52), // 4 s  closing diagonal
+  V3(-10, 96,-45), // 6 s  barrel roll starts
+  V3(  4, 94,-34), // 8 s  mid roll
+  V3( 16, 90,-26), // 10 s close pass right, ~1/3 frame
+  V3( 24,104,-48), // 12 s pull up, burner lights
+  V3( 30,132,-62), // 14 s climbing away through wisp
+  V3(  6,128,-140),  // 16 s curving back
+  V3(-22,104,-70), // 18 s
+];
+const curve=new THREE.CatmullRomCurve3(keys,true,'centripetal',0.5);
+
+const easeIO=x=>x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const sstep=(a,b,x)=>{const t=Math.min(Math.max((x-a)/(b-a),0),1);return t*t*(3-2*t);};
+const win=(t,a,b,f=0.6)=>sstep(a,a+f,t)*(1-sstep(b-f,b,t));
+
+function rollAt(t){
+  // base bank from turn rate
+  const u=(t/LOOP)%1;
+  const t1=curve.getTangent(u);
+  const t2=curve.getTangent((u+0.005)%1);
+  const turn=(t1.x*t2.z-t1.z*t2.x)/0.005;
+  let bank=Math.max(-0.55,Math.min(0.55,turn*0.9));
+  // full barrel roll 6-9 s
+  if(t>=6&&t<=9) bank+=Math.PI*2*easeIO((t-6)/3);
+  return bank;
+}
+function poseAt(t, out){
+  const u=((t%LOOP)+LOOP)%LOOP/LOOP;
+  curve.getPoint(u, out.pos);
+  curve.getTangent(u, out.tan).normalize();
+  out.roll=rollAt(((t%LOOP)+LOOP)%LOOP);
+  const f=out.tan;
+  const zAxis=_v1.copy(f).negate();            // jet local forward is -Z
+  const xAxis=_v2.set(0,1,0).cross(zAxis).normalize();
+  if(xAxis.lengthSq()<1e-6) xAxis.set(1,0,0);
+  const yAxis=_v3.crossVectors(zAxis,xAxis);
+  _m1.makeBasis(xAxis,yAxis,zAxis);
+  out.quat.setFromRotationMatrix(_m1);
+  _q1.setFromAxisAngle(f, out.roll);
+  out.quat.premultiply(_q1);
+  return out;
+}
+const _v1=new THREE.Vector3(),_v2=new THREE.Vector3(),_v3=new THREE.Vector3(),_m1=new THREE.Matrix4(),_q1=new THREE.Quaternion();
+const _pose={pos:new THREE.Vector3(),tan:new THREE.Vector3(),quat:new THREE.Quaternion(),roll:0};
+const _poseB={pos:new THREE.Vector3(),tan:new THREE.Vector3(),quat:new THREE.Quaternion(),roll:0};
+const _tmpV=new THREE.Vector3(), _tmpV2=new THREE.Vector3();
+
+/* camera choreography */
+const camBase=V3(0,90,0);
+function updateCamera(t){
+  const track=win(t,8.8,12.4,0.8);
+  const track2=win(t,11.5,16.5,1.0); // full track during the burner pull-up so the tower wall slides out of frame
+  const shake=Math.exp(-Math.pow((t-10.5)/0.55,2));
+  poseAt(t,_pose);
+  const tgt=_tmpV.set(
+    _pose.pos.x*4.0*track*(1-track2) + _pose.pos.x*0.95*track2,
+    (90+(_pose.pos.y-90)*0.22*track)*(1-track2) + (90+(_pose.pos.y-90)*1.6)*track2 + shake*Math.sin(t*61.0)*0.7,
+    -300
+  );
+  camera.position.copy(camBase);
+  camera.position.x+=shake*Math.sin(t*47.0)*0.9;
+  camera.position.y+=shake*Math.sin(t*53.0+1.3)*0.7;
+  camera.lookAt(tgt);
+  camera.rotateZ(track*0.05 + shake*Math.sin(t*39.0)*0.010);
+  camera.updateMatrixWorld(true);
+}
+
+/* envelopes */
+function burnAt(t){ return sstep(11.8,12.5,t)*(1-sstep(15.6,16.6,t)); }
+function vaporAt(t){ return 0.22+0.75*win(t,9,12.6)+0.3*win(t,6,9); }
+function condenseAt(t){ return win(t,9.4,12.2,0.7); }
+function vconeAt(t){ return win(t,10.15,11.15,0.3); }
+function wakeAt(t){ return win(t,12.4,15.8,0.7); }
+function streakAt(t){ return win(t,10.0,11.3,0.35); }
+
+/* trail ribbon update */
+const tipLocalR=V3(6.95,-0.05,6.1), tipLocalL=V3(-6.95,-0.05,6.1);
+function updateTrail(geo, tipLocal, t){
+  const pos=geo.attributes.position;
+  const camP=camera.position;
+  for(let i=0;i<TRAIL_N;i++){
+    const tt=t-i*0.055;
+    poseAt(tt,_poseB);
+    _tmpV.copy(tipLocal).applyQuaternion(_poseB.quat).add(_poseB.pos);
+    // ribbon width grows with age, oriented toward camera
+    const age=i/(TRAIL_N-1);
+    _tmpV2.copy(camP).sub(_tmpV).normalize();
+    const side=_v3.copy(_poseB.tan).cross(_tmpV2);
+    if(side.lengthSq()<1e-8) side.set(1,0,0);
+    side.normalize().multiplyScalar(0.16+age*2.0);
+    pos.setXYZ(i*2, _tmpV.x-side.x, _tmpV.y-side.y, _tmpV.z-side.z);
+    pos.setXYZ(i*2+1, _tmpV.x+side.x, _tmpV.y+side.y, _tmpV.z+side.z);
+  }
+  pos.needsUpdate=true;
+  geo.computeBoundingSphere();
+}
+
+/* ============================================================
+   SOUND — WebAudio, starts on first click
+   ============================================================ */
+let audio=null;
+function startAudio(){
+  if(audio) return;
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const master=ctx.createGain(); master.gain.value=0.55; master.connect(ctx.destination);
+    // noise buffer
+    const nb=ctx.createBuffer(1,ctx.sampleRate*2,ctx.sampleRate);
+    const nd=nb.getChannelData(0);
+    let last=0;
+    for(let i=0;i<nd.length;i++){ const w=Math.random()*2-1; last=(last+0.02*w)/1.02; nd[i]=w*0.6+last*3.0; }
+    // wind roar
+    const wind=ctx.createBufferSource(); wind.buffer=nb; wind.loop=true;
+    const wf=ctx.createBiquadFilter(); wf.type='bandpass'; wf.frequency.value=480; wf.Q.value=0.6;
+    const wg=ctx.createGain(); wg.gain.value=0.10;
+    wind.connect(wf).connect(wg).connect(master); wind.start();
+    const wlfo=ctx.createOscillator(); wlfo.frequency.value=0.13;
+    const wlg=ctx.createGain(); wlg.gain.value=160;
+    wlfo.connect(wlg).connect(wf.frequency); wlfo.start();
+    // engine whine + roar
+    const e1=ctx.createOscillator(); e1.type='sawtooth'; e1.frequency.value=150;
+    const e2=ctx.createOscillator(); e2.type='sawtooth'; e2.frequency.value=302;
+    const ef=ctx.createBiquadFilter(); ef.type='bandpass'; ef.frequency.value=850; ef.Q.value=0.8;
+    const eg=ctx.createGain(); eg.gain.value=0.0;
+    e1.connect(ef); e2.connect(ef); ef.connect(eg).connect(master);
+    e1.start(); e2.start();
+    const wh=ctx.createOscillator(); wh.type='sine'; wh.frequency.value=2350;
+    const whg=ctx.createGain(); whg.gain.value=0.0;
+    wh.connect(whg).connect(master); wh.start();
+    // afterburner rumble
+    const ab=ctx.createBufferSource(); ab.buffer=nb; ab.loop=true;
+    const abf=ctx.createBiquadFilter(); abf.type='lowpass'; abf.frequency.value=110;
+    const abg=ctx.createGain(); abg.gain.value=0.0;
+    ab.connect(abf).connect(abg).connect(master); ab.start();
+    const sub=ctx.createOscillator(); sub.type='sine'; sub.frequency.value=44;
+    const subg=ctx.createGain(); subg.gain.value=0.0;
+    sub.connect(subg).connect(master); sub.start();
+    // ambient pad
+    const padG=ctx.createGain(); padG.gain.value=0.045;
+    const padF=ctx.createBiquadFilter(); padF.type='lowpass'; padF.frequency.value=750;
+    padF.connect(padG).connect(master);
+    for(const f of [110,164.81,220,329.63]){
+      const o=ctx.createOscillator(); o.type='triangle'; o.frequency.value=f; o.detune.value=(Math.random()-0.5)*8;
+      const g=ctx.createGain(); g.gain.value=0.25;
+      o.connect(g).connect(padF); o.start();
+    }
+    audio={ctx,e1,e2,eg,wh,whg,abg,subg,wg};
+  }catch(e){ /* audio unavailable */ }
+}
+window.addEventListener('pointerdown', startAudio, {once:false});
+window.addEventListener('keydown', startAudio, {once:false});
+
+function updateAudio(t){
+  if(!audio) return;
+  const {ctx,e1,e2,eg,wh,whg,abg,subg,wg}=audio;
+  poseAt(t,_pose); poseAt(t+0.08,_poseB);
+  const toCam=_tmpV.copy(camera.position).sub(_pose.pos);
+  const dist=toCam.length(); toCam.normalize();
+  const vel=_tmpV2.copy(_poseB.pos).sub(_pose.pos).divideScalar(0.08);
+  const vr=vel.dot(toCam);                       // + receding
+  const dop=Math.max(0.62,Math.min(1.55,1-vr/240));
+  const near=Math.max(0,1-dist/650);
+  const ct=ctx.currentTime;
+  e1.frequency.setTargetAtTime(150*dop,ct,0.05);
+  e2.frequency.setTargetAtTime(302*dop,ct,0.05);
+  eg.gain.setTargetAtTime(0.028+0.20*near*near,ct,0.08);
+  wh.frequency.setTargetAtTime(2350*dop,ct,0.05);
+  whg.gain.setTargetAtTime(0.006+0.030*near*near,ct,0.08);
+  const b=burnAt(t);
+  abg.gain.setTargetAtTime(b*0.42*(0.35+0.65*near),ct,0.09);
+  subg.gain.setTargetAtTime(b*0.22*(0.35+0.65*near),ct,0.09);
+  wg.gain.setTargetAtTime(0.09+0.05*near,ct,0.2);
+}
+
+/* ============================================================
+   RESIZE / LAYOUT
+   ============================================================ */
+function layout(){
+  const W=window.innerWidth, H=window.innerHeight;
+  // integer-scale pixel buffer that FILLS the window: scale from height, ceil the buffer,
+  // canvas may overflow by <1 scale px and is center-cropped by body overflow:hidden
+  SCALE=Math.max(1, Math.round(H/300));
+  BW=Math.max(64, Math.ceil(W/SCALE));
+  BH=Math.max(64, Math.ceil(H/SCALE));
+  canvas.width=BW*SCALE; canvas.height=BH*SCALE;
+  CW=Math.max(64, Math.ceil(canvas.width/2));
+  CH=Math.max(64, Math.ceil(canvas.height/2));
+  canvas.style.width=canvas.width+'px'; canvas.style.height=canvas.height+'px';
+  renderer.setSize(canvas.width, canvas.height, false);
+  camera.aspect=BW/BH;
+  camera.updateProjectionMatrix();
+  U.uAspect.value=BW/BH;
+  U.uTanFov.value=Math.tan(camera.fov*Math.PI/360);
+  makeTargets();
+}
+window.addEventListener('resize', layout);
+layout();
+
+/* ============================================================
+   MAIN LOOP
+   ============================================================ */
+const clock=new THREE.Clock();
+let frames=0;
+window.__sunstrike={ get frames(){return frames;}, ready:false, t:0, U, get audioState(){ return audio? audio.ctx.state : 'none'; }, dbg:{ renderer, get sceneRT(){return sceneRT;}, get ldrRT(){return ldrRT;} } };
+
+const nozWorld=[V3(0.86,-0.28,12.4), V3(-0.86,-0.28,12.4)];
+function projectToUV(world, out){
+  // manual NDC (camera matrices freshly updated in updateCamera)
+  _tmpV.copy(world).applyMatrix4(camera.matrixWorldInverse);
+  if(_tmpV.z>0){ out.set(-1,-1); return false; }
+  const vz=-_tmpV.z;
+  const x=_tmpV.x/(vz*U.uTanFov.value*U.uAspect.value);
+  const y=_tmpV.y/(vz*U.uTanFov.value);
+  out.set(x*0.5+0.5, y*0.5+0.5);
+  return true;
+}
+
+function frame(){
+  requestAnimationFrame(frame);
+  const elapsed=clock.getElapsedTime();
+  const t=(frozenT!==null)?((frozenT%LOOP)+LOOP)%LOOP:(elapsed%LOOP);
+  const u=t/LOOP;
+  frames++;
+  window.__sunstrike.t=t;
+
+  /* --- choreography --- */
+  poseAt(t,_pose);
+  jet.position.copy(_pose.pos);
+  jet.quaternion.copy(_pose.quat);
+  jet.updateMatrixWorld(true);
+
+  const rollRate=(rollAt((t+0.06)%LOOP)-rollAt((t-0.06+LOOP)%LOOP))/0.12;
+  // unwrap barrel-roll derivative spike at wrap is fine (clamped)
+  const ailDef=Math.max(-0.45,Math.min(0.45,rollRate*0.14));
+  ailR.rotation.x=ailDef; ailL.rotation.x=-ailDef;
+  const tanAhead=curve.getTangent((u+0.006)%1);
+  const pitchRate=(tanAhead.y-_pose.tan.y)/0.006;
+  const pull=win(t,9,12.5)+win(t,12,15.5)*0.8;
+  const stabDef=Math.max(-0.4,Math.min(0.4,pitchRate*0.10+pull*0.22));
+  stabR.rotation.x=-stabDef; stabL.rotation.x=-stabDef;
+
+  const burn=burnAt(t);
+  U.uBurn.value=burn;
+  U.uTime.value=t;
+  U.uScroll.value=30.0*Math.sin(u*2.0*Math.PI); // very slow global wind drift, loop-periodic
+  trailMat.uniforms.uVapor.value=vaporAt(t);
+  condenseMat.uniforms.uAmt.value=condenseAt(t)*0.45;
+  vconeMat.uniforms.uAmt.value=vconeAt(t);
+  U.uWake.value=wakeAt(t);
+  U.uWakePos.value.copy(_pose.pos);
+  U.uJetPos.value.copy(_pose.pos);
+  U.uJetDir.value.copy(_pose.tan);
+  U.uJetShadow.value=1;
+
+  updateCamera(t);
+  U.uCamPos.value.copy(camera.position);
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  U.uCamRight.value.setFromMatrixColumn(camera.matrixWorld,0);
+  U.uCamUp.value.setFromMatrixColumn(camera.matrixWorld,1);
+  U.uCamFwd.value.setFromMatrixColumn(camera.matrixWorld,2).negate();
+
+  updateTrail(trailRGeo, tipLocalR, t);
+  updateTrail(trailLGeo, tipLocalL, t);
+  updateAudio(t);
+
+  /* --- environment cubemap: actual sky+clouds, refreshed every few frames --- */
+  if(frames%8===1 || frames<4){
+    U.uSteps.value=14; U.uLightSteps.value=3; U.uHasJet.value=0;
+    for(let f=0;f<6;f++){
+      envMat.uniforms.uFace.value=f;
+      quadMesh.material=envMat;
+      renderer.setRenderTarget(cubeRT,f);
+      renderer.render(quadScene,quadCam);
+    }
+    U.uSteps.value=48; U.uLightSteps.value=6; U.uHasJet.value=1;
+  }
+
+  /* --- jet pass (color + depth) --- */
+  renderer.setRenderTarget(jetRT);
+  renderer.setClearColor(0x000000,0);
+  renderer.clear(true,true,false);
+  renderer.render(jetScene,camera);
+
+  /* --- clouds + sky at half screen res (smooth, no temporal boil) --- */
+  runPass(cloudMat, cloudRT);
+  /* --- merge jet pixels under the cloud veil at buffer res --- */
+  runPass(mergeMat, sceneRT);
+
+  /* --- HDR bloom at buffer res (pixel layer) --- */
+  brightMat.uniforms.uTexel.value.set(1/BW,1/BH);
+  brightMat.uniforms.uSrc.value=sceneRT.texture;
+  runPass(brightMat, bloomB);
+  blurMat.uniforms.uSrc.value=bloomB.texture;
+  blurMat.uniforms.uDir.value.set(0.7/BW,0);
+  runPass(blurMat, bloomA);
+  blurMat.uniforms.uSrc.value=bloomA.texture;
+  blurMat.uniforms.uDir.value.set(0,0.7/BH);
+  runPass(blurMat, bloomB);
+  blurMat.uniforms.uSrc.value=bloomB.texture;
+  blurMat.uniforms.uDir.value.set(1.3/BW,0);
+  runPass(blurMat, bloomA);
+  blurMat.uniforms.uSrc.value=bloomA.texture;
+  blurMat.uniforms.uDir.value.set(0,1.3/BH);
+  runPass(blurMat, bloomB);
+  compMat.uniforms.uBloom.value=bloomB.texture;
+
+  /* --- nozzle screen positions for heat shimmer --- */
+  let nozOn=0;
+  if(burn>0.02){
+    const p0=compMat.uniforms.uNoz0.value, p1=compMat.uniforms.uNoz1.value;
+    _tmpV.copy(nozWorld[0]).applyMatrix4(jet.matrixWorld);
+    const ok0=projectToUV(_tmpV,p0);
+    _tmpV.copy(nozWorld[1]).applyMatrix4(jet.matrixWorld);
+    const ok1=projectToUV(_tmpV,p1);
+    nozOn=(ok0||ok1)?1:0;
+  }
+  compMat.uniforms.uNozOn.value=nozOn;
+  compMat.uniforms.uStreak.value=streakAt(t);
+  U.uGlint.value = 1.0 + 2.5*win(t,6.0,9.0,0.5); // hot streak sweep during the barrel roll
+
+  /* --- composite: shimmer, streak, bloom, ACES, grade, vignette, dither --- */
+  runPass(compMat, ldrRT);
+
+  /* --- smooth cloud layer: same post at half res, no quantization --- */
+  brightMat.uniforms.uTexel.value.set(1/CW,1/CH);
+  brightMat.uniforms.uSrc.value=cloudRT.texture;
+  runPass(brightMat, bloomD);
+  blurMat.uniforms.uSrc.value=bloomD.texture;
+  blurMat.uniforms.uDir.value.set(0.7/CW,0);
+  runPass(blurMat, bloomC);
+  blurMat.uniforms.uSrc.value=bloomC.texture;
+  blurMat.uniforms.uDir.value.set(0,0.7/CH);
+  runPass(blurMat, bloomD);
+  blurMat.uniforms.uSrc.value=bloomD.texture;
+  blurMat.uniforms.uDir.value.set(1.3/CW,0);
+  runPass(blurMat, bloomC);
+  blurMat.uniforms.uSrc.value=bloomC.texture;
+  blurMat.uniforms.uDir.value.set(0,1.3/CH);
+  runPass(blurMat, bloomD);
+  compSmoothMat.uniforms.uBloom.value=bloomD.texture;
+  compSmoothMat.uniforms.uNoz0.value.copy(compMat.uniforms.uNoz0.value);
+  compSmoothMat.uniforms.uNoz1.value.copy(compMat.uniforms.uNoz1.value);
+  compSmoothMat.uniforms.uNozOn.value=compMat.uniforms.uNozOn.value;
+  compSmoothMat.uniforms.uStreak.value=compMat.uniforms.uStreak.value;
+  runPass(compSmoothMat, postRT);
+
+  /* --- nearest integer upscale to the window --- */
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(0x05070f,1);
+  renderer.clear(true,false,false);
+  runPass(upMat, null);
+
+  if(frames===2) window.__sunstrike.ready=true;
+}
+frame();
+</script>
+</body>
+</html>

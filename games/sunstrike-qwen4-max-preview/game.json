@@ -1,0 +1,20 @@
+{
+  "slug": "sunstrike-qwen4-max-preview",
+  "title": "Sunstrike",
+  "category": "visuals",
+  "model": "Qwen 4 Max Preview",
+  "version": "Qwen 4 Max Preview · November 2026",
+  "summary": "A fighter jet tearing through golden-hour clouds, pixel art with volumetric light.",
+  "description": "A fighter jet rolls through a sea of golden-hour clouds in a seamless 20 second loop. Pixel art rendered from a low-resolution buffer with raymarched volumetric clouds, PBR metal with a sun glint and afterburner shock diamonds. One self-contained HTML file with three.js; everything is generated in code. Built by Qwen 4 Max Preview in DeepSeek Harness with high reasoning from the same prompt as the other entries in this comparison, then revised over several rounds of feedback with screenshots taken on a real GPU.",
+  "accent": "#f2b25c",
+  "tags": [
+    "Pixel art",
+    "Three.js",
+    "WebGL",
+    "Volumetric light",
+    "Raymarching",
+    "Sunstrike comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}

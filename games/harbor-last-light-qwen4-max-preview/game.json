@@ -1,0 +1,20 @@
+{
+  "slug": "harbor-last-light-qwen4-max-preview",
+  "title": "The Last Light of the Harbor",
+  "category": "visuals",
+  "model": "Qwen 4 Max Preview",
+  "version": "Qwen 4 Max Preview · November 2026",
+  "summary": "A block-built fishing village living through a full day in 48 seconds.",
+  "description": "A block-built fishing village by the sea goes through sunset, blue hour and night in a 48 second cycle: a glitter road on the water, windows switching on one by one and a rotating lighthouse beam in the sea haze. Pixel art with atmospheric scattering, volumetric light through a shadow map and Bayer dithering. One self-contained HTML file with three.js; no assets. Built by Qwen 4 Max Preview in DeepSeek Harness with high reasoning from the same prompt as the other entries in this comparison, then revised over several rounds of feedback with screenshots taken on a real GPU.",
+  "accent": "#ff8a5c",
+  "tags": [
+    "Pixel art",
+    "Three.js",
+    "WebGL",
+    "Volumetric light",
+    "Day cycle",
+    "Harbor comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}

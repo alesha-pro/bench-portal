@@ -1,0 +1,20 @@
+{
+  "slug": "glass-and-light-gpt-6.1-sol",
+  "title": "Glass & Light",
+  "category": "visuals",
+  "model": "GPT-6.1 Sol",
+  "version": "GPT-6.1 Sol · November 2026",
+  "summary": "A glass vase on a table with interactive light, refraction and caustics.",
+  "description": "A glass vase with flowers on a table, built from Gaussian splats and rendered as pixel art. Move the light with the mouse to see refraction through the glass, caustics on the table and shadows from every object. One self-contained HTML file; everything is generated in code. Built by GPT-6.1 Sol in DeepSeek Harness with high reasoning from the same prompt as the other entries in this comparison, then revised over several rounds of feedback with screenshots taken on a real GPU.",
+  "accent": "#e9a65a",
+  "tags": [
+    "Pixel art",
+    "WebGL",
+    "Gaussian splats",
+    "Interactive light",
+    "Caustics",
+    "Glass & Light comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}

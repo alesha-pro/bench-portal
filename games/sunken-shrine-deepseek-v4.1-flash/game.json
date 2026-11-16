@@ -1,0 +1,20 @@
+{
+  "slug": "sunken-shrine-deepseek-v4.1-flash",
+  "title": "The Sunken Shrine",
+  "category": "visuals",
+  "model": "DeepSeek V4.1",
+  "version": "DeepSeek V4.1 Flash · November 2026",
+  "summary": "A single shaft of sunlight falling into a dark cave onto a turquoise pool.",
+  "description": "A beam of sunlight falls through a hole in a cave ceiling onto a turquoise pool and a ruined shrine, with caustics on the rock, warm bounce light and torches along a stone stair. Pixel art with volumetric light marched through the shadow map. One self-contained HTML file with three.js; no textures or models are loaded. Built by DeepSeek V4.1 Flash in DeepSeek Harness with high reasoning from the same prompt as the other entries in this comparison, then revised over several rounds of feedback with screenshots taken on a real GPU.",
+  "accent": "#3fd6c8",
+  "tags": [
+    "Pixel art",
+    "Three.js",
+    "WebGL",
+    "Volumetric light",
+    "Caustics",
+    "Shrine comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}

@@ -1,0 +1,1621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUNSTRIKE</title>
+<style>
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#04060d; }
+  canvas { display:block; width:100vw; height:100vh; image-rendering:pixelated; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   SUNSTRIKE — self-running pixel-art fighter jet scene
+   Everything procedural. 20 s seamless loop. ?t=SECONDS freezes.
+   ============================================================ */
+
+const LOOP = 20.0;
+const BUF_H = 300;
+const params = new URLSearchParams(location.search);
+let FREEZE = params.has('t') ? Math.max(0, parseFloat(params.get('t')) || 0) : null;
+
+const errors = [];
+window.addEventListener('error', e => errors.push(String(e.message)));
+window.addEventListener('unhandledrejection', e => errors.push(String(e.reason)));
+window.__sunstrike = { ready:false, frames:0, t:0, errors };
+/* deterministic PRNG: the cloud field is identical on every load / every frame */
+function mulberry32(a){ return function(){ a|=0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a>>>15, 1 | a); t = t + Math.imul(t ^ t>>>7, 61 | t) ^ t; return ((t ^ t>>>14) >>> 0) / 4294967296; }; }
+const rnd = mulberry32(1337);
+/* single-page multi-time capture for motion-stability checks */
+window.__sunstrike.setT = x => { FREEZE = Math.max(0, +x || 0); };
+
+/* ---------------- renderer ---------------- */
+const renderer = new THREE.WebGLRenderer({ antialias:false, powerPreference:'high-performance' });
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x000000, 0);
+document.body.appendChild(renderer.domElement);
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+renderer.setPixelRatio(DPR);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, 16/9, 0.5, 5000);
+camera.position.set(0, 2, 0);
+
+/* ---------------- sun & sky constants ---------------- */
+const SUN_EL = 12 * Math.PI/180;
+const SUN_AZ = -0.62; // radians from -Z toward -X : sun ahead-left
+const sunDir = new THREE.Vector3(
+  Math.sin(SUN_AZ)*Math.cos(SUN_EL), Math.sin(SUN_EL), -Math.cos(SUN_AZ)*Math.cos(SUN_EL)
+).normalize();
+const SKY_ZENITH  = new THREE.Color(0.12, 0.31, 0.63);
+const SKY_HORIZON = new THREE.Color(1.00, 0.60, 0.34);
+const SUN_COL     = new THREE.Color(1.00, 0.78, 0.50);
+const LETTERBOX   = new THREE.Color(0.012, 0.020, 0.045);
+
+scene.fog = new THREE.FogExp2(new THREE.Color(0.52, 0.36, 0.26), 0.0016);
+
+/* ---------------- lights ---------------- */
+const sunLight = new THREE.DirectionalLight(new THREE.Color(1.0, 0.82, 0.60), 2.6);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(1024, 1024);
+sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 220;
+sunLight.shadow.camera.left = -18; sunLight.shadow.camera.right = 18;
+sunLight.shadow.camera.top = 18; sunLight.shadow.camera.bottom = -18;
+sunLight.shadow.bias = -0.0004; sunLight.shadow.normalBias = 0.5;
+scene.add(sunLight, sunLight.target);
+
+const rimLight = new THREE.DirectionalLight(new THREE.Color(1.0, 0.72, 0.45), 1.3);
+rimLight.position.copy(sunDir).multiplyScalar(-1); // warm rim on edges facing away from sun
+scene.add(rimLight);
+const bounceLight = new THREE.DirectionalLight(new THREE.Color(1.0, 0.62, 0.42), 0.95);
+bounceLight.position.set(0, -1, 0.25); // warm cloud-top bounce onto the belly
+scene.add(bounceLight);
+const hemi = new THREE.HemisphereLight(new THREE.Color(0.55, 0.66, 0.9), new THREE.Color(0.85, 0.6, 0.42), 0.55);
+scene.add(hemi);
+
+/* ---------------- procedural 3D noise texture ----------------
+   R: lattice 16, G: lattice 32, B: lattice 64, A: white noise.
+   Texture wraps; every shader frequency is an integer multiple of
+   1/240 so a 240-unit scroll over the loop is perfectly seamless. */
+function makeNoiseTexture(size = 128) {
+  const data = new Uint8Array(size*size*size*4);
+  const lattices = [16, 32, 64];
+  const grids = lattices.map(n => {
+    const g = new Float32Array(n*n*n);
+    for (let i=0;i<g.length;i++) g[i] = rnd();
+    return { n, g };
+  });
+  const sm = t => t*t*(3-2*t);
+  function sampleGrid(gr, x, y, z) {
+    const n = gr.n, g = gr.g;
+    const fx = x*n, fy = y*n, fz = z*n;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), z0 = Math.floor(fz);
+    const tx = sm(fx-x0), ty = sm(fy-y0), tz = sm(fz-z0);
+    const at = (i,j,k) => g[((i%n)+n)%n + (((j%n)+n)%n)*n + (((k%n)+n)%n)*n*n];
+    let v = 0;
+    for (let k=0;k<2;k++) for (let j=0;j<2;j++) for (let i=0;i<2;i++) {
+      const w = (i?tx:1-tx)*(j?ty:1-ty)*(k?tz:1-tz);
+      v += w*at(x0+i, y0+j, z0+k);
+    }
+    return v;
+  }
+  let p = 0;
+  for (let z=0;z<size;z++) for (let y=0;y<size;y++) for (let x=0;x<size;x++) {
+    const u=(x+0.5)/size, v=(y+0.5)/size, w=(z+0.5)/size;
+    data[p++] = Math.round(sampleGrid(grids[0],u,v,w)*255);
+    data[p++] = Math.round(sampleGrid(grids[1],u,v,w)*255);
+    data[p++] = Math.round(sampleGrid(grids[2],u,v,w)*255);
+    data[p++] = Math.round(rnd()*255);
+  }
+  const tex = new THREE.Data3DTexture(data, size, size, size);
+  tex.format = THREE.RGBAFormat;
+  tex.type = THREE.UnsignedByteType;
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = tex.wrapR = THREE.RepeatWrapping;
+  tex.unpackAlignment = 1;
+  tex.needsUpdate = true;
+  return tex;
+}
+const noiseTex = makeNoiseTexture();
+
+/* fixed 64x64 blue-noise matrix (best-candidate, toroidal), generated ONCE and
+   screen-locked: dithers the march start per pixel so smooth density never
+   shows terrace banding; identical every frame so nothing crawls. Residual
+   grain is cleaned by the mask-weighted gaussian in the final pass. */
+function makeBlueNoise(size = 64) {
+  const N = size*size, K = 12, cell = 8, gw = size/cell;
+  const grid = new Array(gw*gw); for (let i=0;i<grid.length;i++) grid[i]=[];
+  const px = new Float32Array(N), py = new Float32Array(N);
+  const val = new Uint8Array(N);
+  const wrap = d => { d = Math.abs(d); return Math.min(d, size-d); };
+  let placed = 0;
+  for (let i=0;i<N;i++){
+    let best=-1, bx=0, by=0;
+    for (let c=0;c<K;c++){
+      const cx = rnd()*size, cy = rnd()*size;
+      const gx = Math.floor(cx/cell), gy = Math.floor(cy/cell);
+      let mind = 1e9;
+      for (let oy=-1;oy<=1;oy++) for (let ox=-1;ox<=1;ox++){
+        const b = grid[((gy+oy+gw)%gw)*gw + ((gx+ox+gw)%gw)];
+        for (const idx of b){
+          const dx = wrap(cx-px[idx]), dy = wrap(cy-py[idx]);
+          const d = dx*dx+dy*dy; if (d<mind) mind=d;
+        }
+      }
+      if (mind>best){ best=mind; bx=cx; by=cy; }
+    }
+    px[placed]=bx; py[placed]=by;
+    grid[Math.floor(by/cell)*gw + Math.floor(bx/cell)].push(placed);
+    val[Math.floor(by)*size + Math.floor(bx)] = Math.round(255*(i+0.5)/N);
+    placed++;
+  }
+  const t = new THREE.DataTexture(val, size, size, THREE.RedFormat, THREE.UnsignedByteType);
+  t.minFilter = THREE.NearestFilter; t.magFilter = THREE.NearestFilter;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.unpackAlignment = 1; t.needsUpdate = true;
+  return t;
+}
+const blueTex = makeBlueNoise();
+
+/* ---------------- shared shader helpers ---------------- */
+const GLSL_NOISE = /* glsl */`
+  uniform highp sampler3D uNoise;
+  uniform sampler2D tBlue;
+  float n3(vec3 p){ return texture(uNoise, p).r; }
+  float n3g(vec3 p){ return texture(uNoise, p).g; }
+  float fbm(vec3 p){
+    float s = 0.5*n3(p) + 0.25*n3(p*2.0) + 0.125*n3(p*4.0) + 0.0625*n3(p*8.0);
+    return s / 0.9375;
+  }
+  float bayer4(vec2 fc){
+    int x = int(mod(fc.x,4.0)); int y = int(mod(fc.y,4.0));
+    int i = x + y*4;
+    float m[16];
+    m[0]=0.0; m[1]=8.0; m[2]=2.0; m[3]=10.0;
+    m[4]=12.0; m[5]=4.0; m[6]=14.0; m[7]=6.0;
+    m[8]=3.0; m[9]=11.0; m[10]=1.0; m[11]=9.0;
+    m[12]=15.0; m[13]=7.0; m[14]=13.0; m[15]=5.0;
+    return (m[i]+0.5)/16.0;
+  }
+`;
+
+/* ---------------- sky + volumetric clouds (sky dome) ---------------- */
+const cloudUniforms = {
+  uNoise:      { value: noiseTex },
+  tBlue:       { value: blueTex },
+  uScroll:     { value: 0 },
+  uScrollW:    { value: 0 },
+  uPhase:      { value: 0 },
+  uSunDir:     { value: sunDir },
+  uSunColor:   { value: new THREE.Color().copy(SUN_COL).multiplyScalar(4.2) },
+  uSkyZenith:  { value: SKY_ZENITH },
+  uSkyHorizon: { value: SKY_HORIZON },
+  uJet:        { value: new THREE.Vector3() },
+  uJetX:       { value: new THREE.Vector3(1,0,0) },
+  uJetY:       { value: new THREE.Vector3(0,1,0) },
+  uJetZ:       { value: new THREE.Vector3(0,0,1) },
+  uPunch:      { value: 0 },
+  uCoverage:   { value: 0.47 }
+};
+
+const CLOUD_FS = /* glsl */`
+    precision highp float;
+    varying vec3 vWorld;
+    #ifdef JET_COMPOSITE
+    varying vec2 vUv;
+    uniform sampler2D tJetColor, tJetDepth;
+    uniform float uNear, uFar;
+    #endif
+    uniform float uScroll, uScrollW, uPhase, uPunch, uCoverage;
+    uniform vec3 uSunDir, uSunColor, uSkyZenith, uSkyHorizon;
+    uniform vec3 uJet, uJetX, uJetY, uJetZ;
+    ${GLSL_NOISE}
+
+    const float SIGMA = 0.18;
+    const float PI = 3.14159265;
+
+    /* ---- physically based single-scattering sky (Rayleigh + Mie) ---- */
+    float rPhase(float mu){ return 3.0/(16.0*PI)*(1.0+mu*mu); }
+    float mPhase(float mu, float g){
+      float g2=g*g;
+      return (1.0-g2)/(4.0*PI*pow(1.0+g2-2.0*g*mu,1.5));
+    }
+    vec3 skyColor(vec3 rd){
+      const float R = 6371.0, H = 100.0;
+      vec3 o = vec3(0.0, R+2.0, 0.0);
+      vec3 bR = vec3(5.8,13.5,33.1)*1e-3;
+      vec3 bM = vec3(2.5e-3);
+      float mu = dot(rd, uSunDir);
+      float b = dot(o, rd);
+      float c = dot(o,o) - (R+H)*(R+H);
+      float disc = b*b - c;
+      if (disc < 0.0) return vec3(0.0);
+      float tExit = -b + sqrt(disc);
+      float cg = dot(o,o) - R*R;
+      float discg = b*b - cg;
+      if (discg > 0.0) { float tg = -b - sqrt(discg); if (tg > 0.0) tExit = min(tExit, tg); }
+      const int N = 12;
+      float dt = tExit / float(N);
+      vec3 sumR = vec3(0.0), sumM = vec3(0.0);
+      float odR = 0.0, odM = 0.0;
+      for (int i=0;i<N;i++){
+        vec3 p = o + rd*((float(i)+0.5)*dt);
+        float h = max(length(p)-R, 0.0);
+        float hr = exp(-h/8.0)*dt;
+        float hm = exp(-h/1.2)*dt;
+        odR += hr; odM += hm;
+        // sun transmittance: 4 light samples
+        float lb = dot(p, uSunDir);
+        float lc = dot(p,p) - (R+H)*(R+H);
+        float ld = lb*lb - lc;
+        float lt = max(-lb + sqrt(max(ld,0.0)), 0.0);
+        float ldt = lt/4.0;
+        float lodR = 0.0, lodM = 0.0;
+        for (int j=0;j<4;j++){
+          vec3 lp = p + uSunDir*((float(j)+0.5)*ldt);
+          float lh = max(length(lp)-R, 0.0);
+          lodR += exp(-lh/8.0)*ldt;
+          lodM += exp(-lh/1.2)*ldt;
+        }
+        vec3 tau = bR*(odR+lodR) + bM*1.1*(odM+lodM);
+        vec3 att = exp(-tau);
+        sumR += att*hr; sumM += att*hm;
+      }
+      vec3 col = (sumR*bR*rPhase(mu) + sumM*bM*mPhase(mu,0.76)) * 16.0;
+      // gentle saturated blue-zenith / peach-horizon tint (keeps physical luminance)
+      float hh = clamp(rd.y*1.3 + 0.03, 0.0, 1.0);
+      vec3 grad = mix(uSkyHorizon, uSkyZenith, pow(hh, 0.5));
+      col = mix(col, grad*0.7, mix(0.92, 0.90, hh));
+      // crisp sun disk + tight golden glow
+      float disk = smoothstep(0.999975, 0.999992, mu);
+      vec3 sunExt = exp(-(bR*3.2 + bM*1.4)*max(1.0/max(mu,0.05),1.0));
+      col += uSunColor * disk * 5.0 * sunExt * 4.0;
+      col += uSunColor * pow(max(mu,0.0), 600.0) * 0.35;
+      return col;
+    }
+
+    /* ---- cloud density ---- */
+    float fbm3(vec3 p){
+      return (0.5*n3(p) + 0.25*n3(p*2.0) + 0.125*n3(p*4.0))/0.875;
+    }
+    /* ---- cumulus towers as SOLID continuous volumes: low-frequency 3D noise
+       mask × smooth height profile rising from the sea (z period 240 wraps).
+       Density is continuous; only the final colour is Bayer-dithered. ---- */
+    float towerShape(vec3 q, float h){
+      float towerN = n3(q/600.0 + vec3(17.31,5.7,9.13));
+      float tower = smoothstep(0.62, 0.75, towerN);
+      float towerTop = 125.0 + 25.0*tower + 45.0*(n3(q/90.0 + vec3(9.2,1.7,4.4))-0.5);
+      return smoothstep(towerTop, towerTop-60.0, h) * smoothstep(-85.0, -15.0, h) * tower;
+    }
+    float density(vec3 p){
+      vec3 q = p; q.z += uScroll;
+      float h = p.y + 110.0;
+      // continuous rolling cloud sea below (solid, soft edges)
+      float seaTop = -16.0 + 30.0*n3(q/360.0 + vec3(3.7)) + 22.0*(n3(q/90.0 + vec3(4.7,8.1,2.3))-0.5);
+      float sea = smoothstep(seaTop+14.0, seaTop-20.0, h) * smoothstep(16.0, -8.0, h);
+      // solid cumulus towers rise from the sea
+      float tshape = towerShape(q, h);
+      float shape = max(sea*0.85, tshape);
+      shape *= smoothstep(25.0, 80.0, length(p.xz)); // keep a clear bubble around the lens
+      // detail ONLY at the edges, low amplitude: smooth billows, never mottled interiors
+      float billow = n3(q/90.0 + vec3(0.0, 3.1, 0.0));
+      float edge = 1.0 - smoothstep(0.15, 0.6, shape);
+      float d = shape*(1.0 + 0.30*(billow-0.5)*edge) - (1.0-uCoverage)*0.30;
+      // near wisps (slow drift with the same wind)
+      float wmask = smoothstep(150.0, 30.0, length(p)) * smoothstep(55.0, 10.0, abs(p.y-25.0));
+      if (wmask > 0.001) {
+        vec3 wq = vec3(p.x*0.35, p.y*0.6, p.z + uScrollW);
+        float wisp = fbm3(wq/90.0);
+        d += max(wisp-0.70, 0.0)*1.0*wmask;
+      }
+      // jet wake: carve + static swirl where it punches a wisp
+      if (uPunch > 0.001) {
+        vec3 rel = p - uJet;
+        float along = dot(rel, uJetZ);
+        float rad = length(rel - uJetZ*along);
+        float wake = uPunch * smoothstep(7.0, 1.5, rad) * smoothstep(1.0, -16.0, along);
+        float swirl = fbm3(p/8.0);
+        d -= wake*0.9;
+        d += wake*swirl*0.7;
+      }
+      return max(d, 0.0);
+    }
+    // cheaper density for light marches (no wisps/wake)
+    float densityLight(vec3 p){
+      vec3 q = p; q.z += uScroll;
+      float h = p.y + 110.0;
+      float seaTop = -16.0 + 30.0*n3(q/360.0 + vec3(3.7)) + 22.0*(n3(q/90.0 + vec3(4.7,8.1,2.3))-0.5);
+      float sea = smoothstep(seaTop+14.0, seaTop-20.0, h) * smoothstep(16.0, -8.0, h);
+      float tshape = towerShape(q, h);
+      float shape = max(sea*0.85, tshape);
+      shape *= smoothstep(25.0, 80.0, length(p.xz));
+      float billow = n3(q/90.0 + vec3(0.0,3.1,0.0));
+      float edge = 1.0 - smoothstep(0.15, 0.6, shape);
+      return max(shape*(1.0 + 0.30*(billow-0.5)*edge) - (1.0-uCoverage)*0.30, 0.0);
+    }
+
+    /* ---- soft jet shadow on clouds (capsules projected along sun) ---- */
+    vec3 toJet(vec3 l){ return uJet + uJetX*l.x + uJetY*l.y + uJetZ*l.z; }
+    float pseg(vec2 p, vec2 a, vec2 b){
+      vec2 ab = b-a;
+      float t = clamp(dot(p-a,ab)/max(dot(ab,ab),1e-5), 0.0, 1.0);
+      return length(p - (a+ab*t));
+    }
+    float jetShadow(vec3 p){
+      if (distance(p, uJet) > 60.0) return 1.0;
+      vec3 U = normalize(cross(uSunDir, vec3(0.0,1.0,0.0)));
+      vec3 V = cross(uSunDir, U);
+      vec2 pp = vec2(dot(p,U), dot(p,V));
+      float s = 1.0;
+      vec3 a, b; vec2 au, bu; float r;
+      a = toJet(vec3(0.0,0.0,9.0));  b = toJet(vec3(0.0,0.0,-9.0)); r = 1.7;
+      au = vec2(dot(a,U),dot(a,V)); bu = vec2(dot(b,U),dot(b,V));
+      s *= smoothstep(r*0.6, r*1.6, pseg(pp,au,bu));
+      a = toJet(vec3(-6.8,0.0,-4.6)); b = toJet(vec3(6.8,0.0,-4.6)); r = 0.6;
+      au = vec2(dot(a,U),dot(a,V)); bu = vec2(dot(b,U),dot(b,V));
+      s *= smoothstep(r*0.6, r*1.6, pseg(pp,au,bu));
+      a = toJet(vec3(-1.2,2.6,-7.6)); b = toJet(vec3(1.2,2.6,-7.6)); r = 0.7;
+      au = vec2(dot(a,U),dot(a,V)); bu = vec2(dot(b,U),dot(b,V));
+      s *= smoothstep(r*0.6, r*1.6, pseg(pp,au,bu));
+      a = toJet(vec3(-3.9,0.0,-8.0)); b = toJet(vec3(3.9,0.0,-8.0)); r = 0.5;
+      au = vec2(dot(a,U),dot(a,V)); bu = vec2(dot(b,U),dot(b,V));
+      s *= smoothstep(r*0.6, r*1.6, pseg(pp,au,bu));
+      return s;
+    }
+
+    float hg(float mu, float g){
+      float g2=g*g;
+      return (1.0-g2)/(4.0*PI*pow(1.0+g2-2.0*g*mu,1.5));
+    }
+
+    void main(){
+      vec3 ro = cameraPosition;
+      vec3 rd = normalize(vWorld - ro);
+      vec3 bg = skyColor(rd);
+      // jet depth limit + colour (composite pass only)
+      float tJet = 1e6;
+      vec3 jetCol = vec3(0.0);
+      #ifdef JET_COMPOSITE
+      float jd = texture2D(tJetDepth, vUv).x;
+      if (jd < 0.9999) {
+        float vz = -(uNear*uFar)/(jd*(uFar-uNear)+uNear);
+        vec3 fwd = -mat3(viewMatrix)[2];
+        tJet = -vz/max(dot(rd,fwd),1e-4);
+        jetCol = texture2D(tJetColor, vUv).rgb;
+      }
+      #endif
+      vec3 acc = vec3(0.0);
+      float T = 1.0;
+
+      // cloud slab y in [-160, 175]
+      float t0 = 0.0, t1 = 950.0;
+      if (abs(rd.y) > 1e-4) {
+        float ta = (-160.0 - ro.y)/rd.y;
+        float tb = ( 175.0 - ro.y)/rd.y;
+        t0 = max(min(ta,tb), 0.0);
+        t1 = min(max(ta,tb), t1);
+      } else if (ro.y < -160.0 || ro.y > 175.0) { t1 = 0.0; }
+      t1 = min(t1, tJet);
+
+      float mu = dot(rd, uSunDir);
+      float phase = 0.62*hg(mu,0.8) + 0.38*hg(mu,-0.3);
+      float airPhase = 0.5*hg(mu,0.6) + 0.08;
+      vec3 ambient = mix(vec3(0.30,0.34,0.52), uSkyZenith*0.9 + uSkyHorizon*0.22, 0.45);
+
+      if (t1 > t0) {
+        const int STEPS = 96;
+        float dt = (t1-t0)/float(STEPS);
+        float jit = texture2D(tBlue, gl_FragCoord.xy/64.0).r; // fixed per-pixel blue-noise: no terraces, no temporal crawl
+        float sunT = 1.0;
+        for (int i=0;i<STEPS;i++){
+          float t = t0 + (float(i)+jit)*dt;
+          vec3 p = ro + rd*t;
+          float d = density(p);
+          float haze = 0.0028 + 0.0016*smoothstep(20.0,-60.0,p.y);
+          float ext = d*SIGMA + haze;
+          float a = 1.0 - exp(-ext*dt);
+          if (a > 0.0005) {
+            // one shared light march: cloud lighting + crepuscular shafts
+            if (d > 0.002 || (i - (i/2)*2) == 0) {
+              float tau = 0.0;
+              float ldt = 13.0;
+              for (int j=0;j<6;j++){
+                vec3 lp = p + uSunDir*((float(j)+0.5)*ldt);
+                tau += densityLight(lp)*ldt;
+              }
+              sunT = exp(-tau*SIGMA*1.15) * jetShadow(p);
+            }
+            vec3 light = vec3(0.0);
+            if (d > 0.002) {
+              float powder = 1.0 - exp(-d*2.6);
+              vec3 amb = ambient * (0.55 + 0.45*smoothstep(-60.0, 90.0, p.y)) * (1.0 - 0.45*min(d,1.0));
+              light = uSunColor * sunT * powder * phase * 1.8 + amb*0.28;
+            }
+            // aerial in-scatter: shafts of sunlight in clear air
+            light += uSunColor * sunT * airPhase * haze * 3.0;
+            light += ambient * haze * 0.6;
+            acc += T * a * light;
+            T *= 1.0 - a;
+            if (T < 0.02) break;
+          }
+        }
+      }
+      vec3 base = bg;
+      #ifdef JET_COMPOSITE
+      if (tJet < 1e5) base = jetCol;
+      #endif
+      vec3 col = acc + T*base;
+      gl_FragColor = vec4(col, 1.0 - T); // alpha = cloud opacity (mask for smooth clouds)
+    }
+`;
+
+const skyMat = new THREE.ShaderMaterial({
+  uniforms: cloudUniforms,
+  side: THREE.BackSide,
+  depthWrite: false,
+  depthTest: false,
+  vertexShader: /* glsl */`
+    varying vec3 vWorld;
+    void main(){
+      vec4 wp = modelMatrix * vec4(position,1.0);
+      vWorld = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: CLOUD_FS
+});
+const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(3200, 24, 16), skyMat);
+skyMesh.renderOrder = -1;
+skyMesh.frustumCulled = false;
+scene.add(skyMesh);
+
+/* fullscreen cloud composite over the jet pass */
+const cloudCompMat = new THREE.ShaderMaterial({
+  defines: { JET_COMPOSITE: 1 },
+  uniforms: Object.assign({}, cloudUniforms, {
+    tJetColor: { value: null }, tJetDepth: { value: null },
+    uNear: { value: camera.near }, uFar: { value: camera.far },
+    uInvProj: { value: new THREE.Matrix4() }, uInvView: { value: new THREE.Matrix4() }
+  }),
+  depthWrite: false, depthTest: false,
+  vertexShader: /* glsl */`
+    varying vec3 vWorld; varying vec2 vUv;
+    uniform mat4 uInvProj, uInvView;
+    void main(){
+      vUv = uv;
+      gl_Position = vec4(position.xy, 0.0, 1.0);
+      vec4 vp = uInvProj * vec4(position.xy, 1.0, 1.0);
+      vec3 rdV = normalize(vp.xyz);
+      vWorld = cameraPosition + (uInvView * vec4(rdV, 0.0)).xyz * 1000.0;
+    }`,
+  fragmentShader: CLOUD_FS
+});
+
+/* ---------------- environment cubemap (sky + clouds reflections) ---------------- */
+const cubeRT = new THREE.WebGLCubeRenderTarget(128, {
+  type: THREE.HalfFloatType, format: THREE.RGBAFormat,
+  minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+  generateMipmaps: false
+});
+const cubeCam = new THREE.CubeCamera(0.5, 4500, cubeRT);
+scene.add(cubeCam);
+scene.environment = cubeRT.texture;
+
+/* ============================================================
+   THE JET — generic modern fighter, built from code
+   local +Z = nose direction
+   ============================================================ */
+const jet = new THREE.Group();
+scene.add(jet);
+
+/* ---- procedural panel texture ---- */
+function makePanelTextures(antiGlare = true) {
+  const S = 1024;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const ctx = cv.getContext('2d');
+  const rv = document.createElement('canvas'); rv.width = rv.height = S;
+  const rctx = rv.getContext('2d');
+  ctx.fillStyle = '#6e7c89'; ctx.fillRect(0,0,S,S);
+  rctx.fillStyle = '#5a5a5a'; rctx.fillRect(0,0,S,S); // roughness ~0.35
+  // panels
+  const rnd = mulberry(1234);
+  let y = 0;
+  while (y < S) {
+    const ph = 60 + Math.floor(rnd()*110);
+    let x = 0;
+    while (x < S) {
+      const pw = 70 + Math.floor(rnd()*150);
+      const l = 100 + Math.floor(rnd()*22) - 11;
+      ctx.fillStyle = `rgb(${l+8},${l+16},${l+26})`;
+      ctx.fillRect(x+1, y+1, pw-2, ph-2);
+      const rr = 80 + Math.floor(rnd()*30);
+      rctx.fillStyle = `rgb(${rr},${rr},${rr})`;
+      rctx.fillRect(x+1, y+1, pw-2, ph-2);
+      ctx.strokeStyle = 'rgba(38,44,52,0.85)'; ctx.lineWidth = 1.6;
+      ctx.strokeRect(x+0.5, y+0.5, pw-1, ph-1);
+      // rivets along edges
+      ctx.fillStyle = 'rgba(30,36,44,0.55)';
+      for (let rx=x+8; rx<x+pw-6; rx+=16) { dot(ctx,rx,y+5,1.3); dot(ctx,rx,y+ph-5,1.3); }
+      for (let ry=y+8; ry<y+ph-6; ry+=16) { dot(ctx,x+5,ry,1.3); dot(ctx,x+pw-5,ry,1.3); }
+      x += pw;
+    }
+    y += ph;
+  }
+  // weathering streaks
+  for (let i=0;i<260;i++){
+    const x = rnd()*S, yy = rnd()*S, len = 14+rnd()*70;
+    ctx.fillStyle = `rgba(40,44,50,${0.04+rnd()*0.08})`;
+    ctx.fillRect(x, yy, 1.5+rnd()*2.5, len);
+    rctx.fillStyle = `rgba(200,200,200,${0.05+rnd()*0.1})`;
+    rctx.fillRect(x, yy, 2, len);
+  }
+  // grime speckle
+  for (let i=0;i<5200;i++){
+    const x=rnd()*S, yy=rnd()*S;
+    ctx.fillStyle = `rgba(${rnd()<0.5?'28,32,38':'150,158,166'},${0.05+rnd()*0.09})`;
+    ctx.fillRect(x,yy,1.4,1.4);
+  }
+  // anti-glare panel ahead of canopy (fuselage UV: u around section, v nose->tail)
+  if (antiGlare) {
+    ctx.fillStyle = '#23282e';
+    ctx.fillRect(S*0.30, S*0.015, S*0.40, S*0.225);
+    rctx.fillStyle = '#9a9a9a';
+    rctx.fillRect(S*0.30, S*0.015, S*0.40, S*0.225);
+    for (let i=0;i<900;i++){
+      ctx.fillStyle = `rgba(70,76,84,${0.05+rnd()*0.08})`;
+      ctx.fillRect(S*0.30+rnd()*S*0.40, S*0.015+rnd()*S*0.225, 1.5, 1.5);
+    }
+  }
+  const map = new THREE.CanvasTexture(cv);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.anisotropy = 4;
+  const rough = new THREE.CanvasTexture(rv);
+  rough.wrapS = rough.wrapT = THREE.RepeatWrapping;
+  return { map, rough };
+}
+function dot(ctx,x,y,r){ ctx.beginPath(); ctx.arc(x,y,r,0,6.2832); ctx.fill(); }
+function mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const panel = makePanelTextures(true);
+const panelWing = makePanelTextures(false);
+
+const bodyMat = new THREE.MeshStandardMaterial({
+  map: panel.map, roughnessMap: panel.rough, roughness: 1.0,
+  metalness: 0.6, envMapIntensity: 1.25
+});
+const wingMap = panelWing.map; wingMap.repeat.set(0.09, 0.09); wingMap.offset.set(0.02, 0.31);
+const wingRough = panelWing.rough; wingRough.repeat.set(0.09, 0.09); wingRough.offset.set(0.02, 0.31);
+const wingMat = new THREE.MeshStandardMaterial({
+  map: wingMap, roughnessMap: wingRough, roughness: 1.0,
+  metalness: 0.6, envMapIntensity: 1.25
+});
+const edgeMat = new THREE.MeshStandardMaterial({
+  color: 0x8b98a4, metalness: 0.72, roughness: 0.22, envMapIntensity: 1.7
+});
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x33383f, metalness: 0.5, roughness: 0.55, envMapIntensity: 0.8 });
+const missileMat = new THREE.MeshStandardMaterial({ color: 0xcdd2d6, metalness: 0.2, roughness: 0.5, envMapIntensity: 0.9 });
+const canopyMat = new THREE.MeshPhysicalMaterial({
+  color: 0x14181c, metalness: 0.0, roughness: 0.35,
+  envMapIntensity: 0.35, emissive: 0x000000,
+  clearcoat: 0.0, clearcoatRoughness: 0.3,
+  specularColor: new THREE.Color(0xffd080), specularIntensity: 1.0
+});
+
+function mesh(geo, mat, x=0,y=0,z=0){
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x,y,z); m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
+
+/* ---- fuselage loft with chined sections ---- */
+function buildFuselage(){
+  const stations = [
+    [10.0, 0.06, 0.06], [8.6, 0.42, 0.38], [6.6, 0.82, 0.72],
+    [4.6, 1.02, 0.92], [2.2, 1.26, 1.10], [0.0, 1.48, 1.18],
+    [-3.0, 1.66, 1.08], [-6.0, 1.58, 0.98], [-8.4, 1.42, 0.92], [-10.0, 1.22, 0.84]
+  ];
+  const SEG = 10;
+  const pos = [], uv = [], idx = [];
+  stations.forEach(([z,w,h], i) => {
+    const sec = [
+      [0,-h*0.52],[w*0.55,-h*0.5],[w,-h*0.10],[w*0.82,h*0.32],[w*0.35,h*0.5],
+      [0,h*0.55],[-w*0.35,h*0.5],[-w*0.82,h*0.32],[-w,-h*0.10],[-w*0.55,-h*0.5]
+    ];
+    for (let j=0;j<SEG;j++){
+      pos.push(sec[j][0], sec[j][1], z);
+      uv.push(j/SEG, i/(stations.length-1));
+    }
+  });
+  for (let i=0;i<stations.length-1;i++) for (let j=0;j<SEG;j++){
+    const a=i*SEG+j, b=i*SEG+(j+1)%SEG, c=(i+1)*SEG+j, d=(i+1)*SEG+(j+1)%SEG;
+    idx.push(a,c,b, b,c,d);
+  }
+  // tail cap
+  const base = pos.length/3;
+  pos.push(0,0,-10.0); uv.push(0.5,1);
+  const last = (stations.length-1)*SEG;
+  for (let j=0;j<SEG;j++) idx.push(base, last+(j+1)%SEG, last+j);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv,2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+jet.add(mesh(buildFuselage(), bodyMat));
+
+/* ---- wings / LERX (cranked delta) ---- */
+function wingShape(){
+  const s = new THREE.Shape();
+  s.moveTo(1.05, 3.4);
+  s.lineTo(4.3, -1.6);
+  s.lineTo(6.9, -4.3);
+  s.lineTo(6.9, -5.35);
+  s.lineTo(1.25, -6.3);
+  s.closePath();
+  return s;
+}
+function extrudeFlat(shape, thick){
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: thick, bevelEnabled: true, bevelThickness: 0.05,
+    bevelSize: 0.05, bevelSegments: 1, steps: 1
+  });
+  g.rotateX(Math.PI/2); // shape-y -> world z, thickness -> -y
+  g.translate(0, thick/2, 0);
+  return g;
+}
+const wingGeo = extrudeFlat(wingShape(), 0.22);
+const wingR = mesh(wingGeo, wingMat, 0, -0.1, 0);
+const wingL = mesh(wingGeo.clone().scale(-1,1,1), wingMat, 0, -0.1, 0);
+jet.add(wingR, wingL);
+// leading edge strips (hot glint catchers)
+function leStrip(pts){
+  const s = new THREE.Shape();
+  s.moveTo(pts[0][0], pts[0][1]);
+  for (let i=1;i<pts.length;i++) s.lineTo(pts[i][0], pts[i][1]);
+  s.closePath();
+  return extrudeFlat(s, 0.26);
+}
+const leR = mesh(leStrip([[1.05,3.4],[4.3,-1.6],[6.9,-4.3],[6.72,-4.42],[4.18,-1.78],[1.0,3.15]]), edgeMat, 0,-0.1,0);
+const leL = mesh(leStrip([[-1.05,3.4],[-4.3,-1.6],[-6.9,-4.3],[-6.72,-4.42],[-4.18,-1.78],[-1.0,3.15]]), edgeMat, 0,-0.1,0);
+jet.add(leR, leL);
+
+/* ---- ailerons (roll control) ---- */
+function aileron(side){
+  const s = new THREE.Shape();
+  const x0 = 4.4*side, x1 = 6.8*side;
+  s.moveTo(x0, -4.95); s.lineTo(x1, -4.95); s.lineTo(x1, -5.5); s.lineTo(x0, -5.9); s.closePath();
+  const g = extrudeFlat(s, 0.16);
+  g.translate(-5.6*side, 0, 4.95);
+  const m = mesh(g, wingMat);
+  const pivot = new THREE.Group();
+  pivot.position.set(5.6*side, -0.1, -4.95);
+  pivot.add(m);
+  jet.add(pivot);
+  return pivot;
+}
+const ailR = aileron(1), ailL = aileron(-1);
+
+/* ---- stabilators (pitch control) ---- */
+function stabilator(side){
+  const s = new THREE.Shape();
+  s.moveTo(1.4*side, -6.9); s.lineTo(4.2*side, -8.5);
+  s.lineTo(4.2*side, -9.3); s.lineTo(1.4*side, -9.1); s.closePath();
+  const g = extrudeFlat(s, 0.15);
+  g.translate(-2.8*side, 0, 8.0);
+  const m = mesh(g, wingMat);
+  const pivot = new THREE.Group();
+  pivot.position.set(2.8*side, 0.12, -8.0);
+  pivot.add(m);
+  jet.add(pivot);
+  return pivot;
+}
+const stabR = stabilator(1), stabL = stabilator(-1);
+
+/* ---- twin canted vertical tails + tail number ---- */
+function tailNumberTexture(){
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const c = cv.getContext('2d');
+  c.clearRect(0,0,256,128);
+  c.fillStyle = '#383d44';
+  c.font = 'bold 92px monospace';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('27', 128, 68);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const tailNumTex = tailNumberTexture();
+function verticalTail(side){
+  const s = new THREE.Shape();
+  s.moveTo(-5.3, 0.85); s.lineTo(-7.9, 3.55); s.lineTo(-9.15, 3.55); s.lineTo(-8.85, 0.85); s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.15, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1 });
+  g.rotateY(-Math.PI/2); // shape-x -> world z, extrude -> -x
+  const m = mesh(g, wingMat);
+  const grp = new THREE.Group();
+  grp.position.set(1.02*side, 0.5, 0);
+  grp.rotation.z = -0.30*side;
+  grp.add(m);
+  const decal = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.5, 0.75),
+    new THREE.MeshStandardMaterial({ map: tailNumTex, transparent: true, metalness: 0.4, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2 })
+  );
+  decal.position.set(side > 0 ? 0.03 : -0.18, 2.35, -7.5);
+  decal.rotation.y = side > 0 ? Math.PI/2 : -Math.PI/2;
+  grp.add(decal);
+  jet.add(grp);
+  return grp;
+}
+verticalTail(1); verticalTail(-1);
+
+/* ---- canopy + frame: slim teardrop bubble, gold-tinted glass ---- */
+const canopy = mesh(new THREE.SphereGeometry(1, 24, 16), canopyMat, 0, 0.74, 3.2);
+canopy.scale.set(0.56, 0.5, 2.5);
+canopy.castShadow = false;
+jet.add(canopy);
+for (const zz of [1.75, 3.2, 4.55]) {
+  const arch = mesh(new THREE.TorusGeometry(0.56, 0.04, 6, 14, Math.PI), darkMat, 0, 0.72, zz);
+  arch.scale.set(1.0, 0.9, 1);
+  jet.add(arch);
+}
+const spine = mesh(new THREE.BoxGeometry(0.06, 0.06, 3.0), darkMat, 0, 1.22, 3.2);
+jet.add(spine);
+
+/* ---- intakes ---- */
+for (const side of [1,-1]) {
+  const box = mesh(new THREE.BoxGeometry(0.72, 0.82, 2.7), bodyMat, 1.38*side, -0.42, 0.4);
+  box.rotation.y = 0.10*side;
+  jet.add(box);
+  const lip = mesh(new THREE.BoxGeometry(0.78, 0.88, 0.14), edgeMat, 1.44*side, -0.42, 1.78);
+  lip.rotation.y = 0.10*side;
+  jet.add(lip);
+  const hole = mesh(new THREE.PlaneGeometry(0.6, 0.68), new THREE.MeshBasicMaterial({ color: 0x05070a }), 1.45*side, -0.42, 1.86);
+  hole.rotation.y = 0.10*side;
+  jet.add(hole);
+}
+
+/* ---- refuelling probe bump ---- */
+const probe = mesh(new THREE.SphereGeometry(1, 10, 8), bodyMat, 0.95, 0.38, 5.3);
+probe.scale.set(0.13, 0.11, 0.55);
+jet.add(probe);
+
+/* ---- wingtip missiles ---- */
+for (const side of [1,-1]) {
+  const grp = new THREE.Group();
+  grp.position.set(6.95*side, -0.18, -4.85);
+  const body = mesh(new THREE.CylinderGeometry(0.15, 0.15, 2.4, 10), missileMat);
+  body.rotation.x = Math.PI/2;
+  grp.add(body);
+  const nose = mesh(new THREE.ConeGeometry(0.15, 0.55, 10), missileMat, 0, 0, 1.47);
+  nose.rotation.x = Math.PI/2;
+  grp.add(nose);
+  for (let k=0;k<4;k++){
+    const fin = mesh(new THREE.BoxGeometry(0.05, 0.34, 0.4), missileMat);
+    const a = k*Math.PI/2 + Math.PI/4;
+    fin.position.set(Math.cos(a)*0.2, Math.sin(a)*0.2, -1.0);
+    fin.rotation.z = a;
+    grp.add(fin);
+    const canard = mesh(new THREE.BoxGeometry(0.04, 0.2, 0.22), missileMat);
+    canard.position.set(Math.cos(a)*0.16, Math.sin(a)*0.16, 0.9);
+    canard.rotation.z = a;
+    grp.add(canard);
+  }
+  const rail = mesh(new THREE.BoxGeometry(0.1, 0.14, 2.9), darkMat, 0, 0.2, 0);
+  grp.add(rail);
+  jet.add(grp);
+}
+
+/* ---- under-wing pylons + tank ---- */
+for (const side of [1,-1]) {
+  for (const [xx, tank] of [[3.3, true],[4.9, false]]) {
+    const pyl = mesh(new THREE.BoxGeometry(0.14, 0.55, 1.3), darkMat, xx*side, -0.5, -3.6);
+    jet.add(pyl);
+    if (tank) {
+      const t = mesh(new THREE.CylinderGeometry(0.32, 0.28, 2.3, 10), missileMat, xx*side, -0.92, -3.6);
+      t.rotation.x = Math.PI/2;
+      jet.add(t);
+    }
+  }
+}
+
+/* ---- engines + petal nozzles ---- */
+const nozzleGroups = [];
+const burnDisks = [];
+const burnCones = [];
+const burnUniforms = { uBurn:{value:0}, uPhase:{value:0} };
+for (const side of [1,-1]) {
+  const eng = mesh(new THREE.CylinderGeometry(0.62, 0.58, 2.6, 14), darkMat, 0.78*side, -0.05, -9.0);
+  eng.rotation.x = Math.PI/2;
+  jet.add(eng);
+  const petals = new THREE.Group();
+  petals.position.set(0.78*side, -0.05, -10.35);
+  for (let k=0;k<14;k++){
+    const a = k/14*Math.PI*2;
+    const p = mesh(new THREE.BoxGeometry(0.30, 0.055, 1.15), darkMat);
+    p.position.set(Math.cos(a)*0.56, Math.sin(a)*0.56, -0.35);
+    p.rotation.z = a;
+    p.rotation.x = 0.16;
+    petals.add(p);
+  }
+  jet.add(petals);
+  nozzleGroups.push(petals);
+  // emissive interior disk
+  const disk = new THREE.Mesh(new THREE.CircleGeometry(0.5, 16), new THREE.ShaderMaterial({
+    uniforms: burnUniforms,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: true, side: THREE.DoubleSide,
+    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: /* glsl */`
+      uniform float uBurn, uPhase; varying vec2 vUv;
+      void main(){
+        float r = length(vUv-0.5)*2.0;
+        float core = smoothstep(1.0, 0.15, r);
+        float flick = 0.9 + 0.1*sin(uPhase*6.2832*9.0 + r*4.0);
+        vec3 c = mix(vec3(1.0,0.35,0.06), vec3(1.0,0.85,0.55), core);
+        float i = (0.25 + uBurn*7.0) * core * flick;
+        if (core < 0.03) discard;
+        gl_FragColor = vec4(c*i, core);
+      }`
+  }));
+  disk.position.set(0.78*side, -0.05, -10.15);
+  disk.rotation.y = Math.PI;
+  jet.add(disk);
+  burnDisks.push(disk);
+  // afterburner cone with shock diamonds
+  const coneGeo = new THREE.CylinderGeometry(0.10, 0.5, 5.2, 12, 10, true);
+  coneGeo.rotateX(-Math.PI/2); // axis -> +Z? cylinder y-axis; rotateX(-90): y-> -z... fix below
+  coneGeo.translate(0, 0, -2.6);
+  const cone = new THREE.Mesh(coneGeo, new THREE.ShaderMaterial({
+    uniforms: burnUniforms,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: true, side: THREE.DoubleSide,
+    vertexShader: /* glsl */`
+      varying vec3 vLocal; varying vec2 vUv;
+      void main(){ vLocal = position; vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: /* glsl */`
+      uniform float uBurn, uPhase; varying vec3 vLocal; varying vec2 vUv;
+      void main(){
+        float z = clamp(-vLocal.z/5.2, 0.0, 1.0); // 0 at nozzle -> 1 tip
+        float r = length(vLocal.xy)/mix(0.5, 0.10, z);
+        float body = smoothstep(1.0, 0.3, r);
+        float diamonds = pow(0.5+0.5*sin(z*34.0 - uPhase*6.2832*8.0), 5.0);
+        float flick = 0.88 + 0.12*sin(uPhase*6.2832*13.0 + z*9.0);
+        vec3 orange = vec3(1.0, 0.42, 0.08);
+        vec3 blue = vec3(0.35, 0.55, 1.0);
+        vec3 c = mix(orange, blue, smoothstep(0.15, 0.85, z));
+        c += vec3(1.0,0.9,0.8)*diamonds*0.9*(1.0-z);
+        float i = uBurn * body * (1.0-z*0.75) * (1.0 + diamonds*1.6) * flick * 4.5;
+        if (i < 0.02) discard;
+        gl_FragColor = vec4(c*i, i*0.5);
+      }`
+  }));
+  cone.position.set(0.78*side, -0.05, -10.6);
+  jet.add(cone);
+  burnCones.push(cone);
+}
+
+/* ---- vapor: condensation sheets over wings ---- */
+const vaporUniforms = {
+  uEnv:{value:0}, uPhase:{value:0}, uSunDir:{value:sunDir}, uNoise:{value:noiseTex}
+};
+const sheetMat = new THREE.ShaderMaterial({
+  uniforms: vaporUniforms, transparent: true, depthWrite: true, side: THREE.DoubleSide,
+  vertexShader: /* glsl */`
+    varying vec2 vUv; varying vec3 vN;
+    void main(){ vUv = (position.xy - vec2(-7.0,-6.5))/vec2(14.0,10.0);
+      vN = normalize(mat3(modelMatrix)*normal);
+      gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform float uEnv, uPhase; uniform vec3 uSunDir; uniform highp sampler3D uNoise;
+    varying vec2 vUv; varying vec3 vN;
+    void main(){
+      float n = texture(uNoise, vec3(vUv*3.0, uPhase*2.0)).g;
+      float n2 = texture(uNoise, vec3(vUv*7.0+0.37, uPhase*3.0)).b;
+      float a = uEnv * smoothstep(0.35, 0.9, n*0.6+n2*0.4);
+      float edge = smoothstep(0.0, 0.15, vUv.x)*smoothstep(1.0, 0.85, vUv.x)
+                 * smoothstep(0.0, 0.15, vUv.y)*smoothstep(1.0, 0.85, vUv.y);
+      float lit = 0.5+0.5*dot(normalize(vN), uSunDir);
+      vec3 c = mix(vec3(0.5,0.55,0.7), vec3(1.05,0.88,0.62), lit) * 1.6;
+      float fa = a*edge*0.5;
+      if (fa < 0.03) discard;
+      gl_FragColor = vec4(c, fa);
+    }`
+});
+function wingSheet(side){
+  const s = new THREE.Shape();
+  s.moveTo(1.3*side, 2.8); s.lineTo(4.2*side, -1.7); s.lineTo(6.6*side, -4.2);
+  s.lineTo(6.6*side, -5.1); s.lineTo(1.4*side, -6.0); s.closePath();
+  const g = new THREE.ShapeGeometry(s);
+  g.rotateX(Math.PI/2);
+  const m = new THREE.Mesh(g, sheetMat);
+  m.position.y = 0.28;
+  m.renderOrder = 3;
+  jet.add(m);
+  return m;
+}
+wingSheet(1); wingSheet(-1);
+
+/* ---- vapor cone burst ---- */
+const coneUniforms = { uEnv:{value:0}, uPhase:{value:0}, uNoise:{value:noiseTex} };
+const vaporCone = new THREE.Mesh(
+  new THREE.ConeGeometry(3.1, 3.4, 20, 6, true),
+  new THREE.ShaderMaterial({
+    uniforms: coneUniforms, transparent: true, depthWrite: true, side: THREE.DoubleSide,
+    vertexShader: `varying vec2 vUv; varying vec3 vN;
+      void main(){ vUv=uv; vN=normalize(mat3(modelMatrix)*normal);
+        gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: /* glsl */`
+      uniform float uEnv, uPhase; uniform highp sampler3D uNoise;
+      varying vec2 vUv; varying vec3 vN;
+      void main(){
+        float n = texture(uNoise, vec3(vUv*4.0, uPhase*3.0)).g;
+        float band = smoothstep(0.0,0.3,vUv.y)*smoothstep(1.0,0.55,vUv.y);
+        float a = uEnv * band * smoothstep(0.6,0.97,n) * 0.10;
+        vec3 c = mix(vec3(0.72,0.78,0.88), vec3(1.0,0.95,0.85), 0.25) * 0.9;
+        if (a < 0.02) discard;
+        gl_FragColor = vec4(c, a);
+      }`
+  })
+);
+vaporCone.rotation.x = Math.PI/2; // apex toward +Z (nose)
+vaporCone.position.set(0, 0.1, 1.2);
+vaporCone.renderOrder = 3;
+jet.add(vaporCone);
+
+/* ---- wingtip vortex trails (world-space ribbons) ---- */
+const TRAIL_N = 44;
+const trailMat = new THREE.ShaderMaterial({
+  uniforms: { uSunDir:{value:sunDir}, uCamPos:{value:new THREE.Vector3()} },
+  transparent: true, depthWrite: true, side: THREE.DoubleSide,
+  vertexShader: /* glsl */`
+    attribute float aAge;
+    varying float vAge; varying vec3 vN;
+    void main(){ vAge = aAge; vN = normal;
+      gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform vec3 uSunDir; varying float vAge; varying vec3 vN;
+    void main(){
+      float lit = 0.5+0.5*dot(normalize(vN), uSunDir);
+      vec3 c = mix(vec3(0.45,0.5,0.66), vec3(1.05,0.85,0.55), lit);
+      c *= 2.6; // jetRT clears to black; boost so vapor reads bright, not a dark spike
+      float a = (1.0-vAge)*(1.0-vAge)*0.4;
+      if (a < 0.03) discard; // no depth write where invisible -> no black trail tail
+      gl_FragColor = vec4(c, a);
+    }`
+});
+function makeTrail(){
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N*2*3), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(TRAIL_N*2*3), 3));
+  g.setAttribute('aAge', new THREE.BufferAttribute(new Float32Array(TRAIL_N*2), 1));
+  const idx = [];
+  for (let i=0;i<TRAIL_N-1;i++){
+    const a=i*2, b=i*2+1, c=(i+1)*2, d=(i+1)*2+1;
+    idx.push(a,b,c, b,d,c);
+  }
+  g.setIndex(idx);
+  const m = new THREE.Mesh(g, trailMat);
+  m.frustumCulled = false;
+  m.renderOrder = 2;
+  scene.add(m);
+  return m;
+}
+const trailL = makeTrail(), trailR = makeTrail();
+const tipLocalL = new THREE.Vector3(-6.95, -0.1, -4.9);
+const tipLocalR = new THREE.Vector3( 6.95, -0.1, -4.9);
+
+/* ---- sun glint star (billboard, HDR) ---- */
+function starTexture(){
+  const S = 128, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  const g = c.createRadialGradient(S/2,S/2,0,S/2,S/2,S/2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.03, 'rgba(255,244,220,0.85)');
+  g.addColorStop(0.09, 'rgba(255,214,160,0.0)');
+  g.addColorStop(1, 'rgba(255,200,120,0)');
+  c.fillStyle = g; c.fillRect(0,0,S,S);
+  c.globalCompositeOperation = 'lighter';
+  const spike = (ang, len, w) => {
+    c.save(); c.translate(S/2,S/2); c.rotate(ang);
+    const lg = c.createLinearGradient(-len,0,len,0);
+    lg.addColorStop(0,'rgba(255,220,160,0)');
+    lg.addColorStop(0.5,'rgba(255,248,228,1)');
+    lg.addColorStop(1,'rgba(255,220,160,0)');
+    c.fillStyle = lg; c.fillRect(-len,-w/2,len*2,w);
+    c.restore();
+  };
+  spike(0, S*0.5, 1.6); spike(Math.PI/2, S*0.5, 1.6);
+  spike(Math.PI/4, S*0.22, 1.0); spike(-Math.PI/4, S*0.22, 1.0);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const glintMat = new THREE.MeshBasicMaterial({
+  map: starTexture(), transparent: true, blending: THREE.AdditiveBlending,
+  depthWrite: true, depthTest: true
+});
+glintMat.color.setRGB(1,1,1);
+const glint = new THREE.Mesh(new THREE.PlaneGeometry(1,1), glintMat);
+glint.renderOrder = 4;
+glint.frustumCulled = false;
+scene.add(glint);
+// HDR boost via onBeforeCompile-free trick: multiply in shader
+glintMat.onBeforeCompile = (sh) => {
+  sh.uniforms.uBoost = { value: 1 };
+  sh.fragmentShader = sh.fragmentShader.replace(
+    '#include <color_fragment>',
+    '#include <color_fragment>\n diffuseColor.rgb *= 24.0;'
+  );
+};
+
+/* ============================================================
+   FLIGHT PATH — closed spline, 20 s loop
+   ============================================================ */
+const pathPoints = [
+  new THREE.Vector3(-30, 24,  -74),  // t0   far upper-left (~1/7 frame width)
+  new THREE.Vector3(-24, 22,  -66),  // t2.5 closing diagonal
+  new THREE.Vector3(-14, 24,  -62),  // t5
+  new THREE.Vector3(  3, 26,  -46),  // t7.5 barrel roll
+  new THREE.Vector3( 16, 26,  -22),  // t10  close pass right
+  new THREE.Vector3( 12, 30,  -52),  // t12.5 pull up
+  new THREE.Vector3( -8, 28,  -78),  // t15  climb ahead, burner
+  new THREE.Vector3(-26, 26,  -72)   // t17.5 curve back
+];
+const path = new THREE.CatmullRomCurve3(pathPoints, true, 'centripetal', 0.5);
+
+const smoother = (a,b,x) => { const t = Math.min(Math.max((x-a)/(b-a),0),1); return t*t*t*(t*(t*6-15)+10); };
+const clamp01 = x => Math.min(Math.max(x,0),1);
+
+function flightState(t){
+  const u = (t % LOOP)/LOOP;
+  const pos = path.getPoint(u);
+  const tan = path.getTangent(u).normalize();
+  // roll: full barrel roll 6..9 s + gentle periodic bank
+  const roll = Math.PI*2*smoother(6,9,t) + 0.30*Math.sin(u*Math.PI*2);
+  // basis: nose +Z along tangent
+  const z = tan;
+  const x = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), z).normalize();
+  const y = new THREE.Vector3().crossVectors(z, x);
+  const m = new THREE.Matrix4().makeBasis(x,y,z);
+  const q = new THREE.Quaternion().setFromRotationMatrix(m);
+  const qr = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), roll);
+  q.multiply(qr);
+  // control surfaces
+  const rollRate = (6.2832/(3.0))*smoother(6,9,t)*(1-smoother(8.6,9.4,t)) ; // approx
+  const dRoll = (smoother(6,9,t+0.05)-smoother(6,9,t-0.05))/0.1;
+  const ail = Math.min(Math.max(dRoll*1.1,-1),1)*0.5;
+  const pitchRate = (path.getTangent((u+0.004)%1).y - path.getTangent((u-0.004+1)%1).y)/0.008;
+  const stab = Math.min(Math.max(pitchRate*0.35,-1),1)*0.3;
+  // envelopes
+  const burn = smoother(11.7,12.5,t)*(1-smoother(15.7,16.5,t));
+  const vapor = smoother(8.8,9.8,t)*(1-smoother(11.6,12.6,t));
+  const burst = smoother(10.0,10.35,t)*(1-smoother(10.8,11.3,t));
+  const punch = smoother(12.2,13.0,t)*(1-smoother(15.0,15.8,t));
+  const trail = smoother(8.4,9.2,t)*(1-smoother(17.8,19.0,t));
+  const track = smoother(9.0,10.0,t)*(1-smoother(11.6,12.6,t));
+  const shake = smoother(10.0,10.45,t)*(1-smoother(10.9,11.8,t));
+  const streak = smoother(9.8,10.4,t)*(1-smoother(11.0,11.8,t));
+  return { pos, tan, q, x, y, z, roll, ail, stab, burn, vapor, burst, punch, trail, track, shake, streak, u };
+}
+
+/* ============================================================
+   POST PIPELINE (all at buffer resolution)
+   ============================================================ */
+const quadCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const quadScene = new THREE.Scene();
+const quadMesh = new THREE.Mesh(new THREE.PlaneGeometry(2,2), null);
+quadMesh.frustumCulled = false;
+quadScene.add(quadMesh);
+function runPass(mat, target){
+  quadMesh.material = mat;
+  renderer.setRenderTarget(target);
+  renderer.render(quadScene, quadCam);
+}
+const QUAD_VS = `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`;
+
+let bufW = 533, bufH = BUF_H, scale = 1, offX = 0, offY = 0, screenW = 0, screenH = 0;
+let cloudW = 960, cloudH = 540;   // clouds render at half screen res, linear-upscaled
+function makeRT(w,h,depth=false,linear=false){
+  const f = linear ? THREE.LinearFilter : THREE.NearestFilter;
+  return new THREE.WebGLRenderTarget(w,h,{
+    type: THREE.HalfFloatType, format: THREE.RGBAFormat,
+    minFilter: f, magFilter: f,
+    depthBuffer: depth, generateMipmaps: false
+  });
+}
+let sceneRT = makeRT(cloudW,cloudH,false,true);
+const jetDepthTex = new THREE.DepthTexture(bufW, bufH);
+jetDepthTex.type = THREE.UnsignedIntType;
+let jetRT = new THREE.WebGLRenderTarget(bufW, bufH, {
+  type: THREE.HalfFloatType, format: THREE.RGBAFormat,
+  minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+  depthBuffer: true, depthTexture: jetDepthTex, generateMipmaps: false
+});
+let shadeRT = makeRT(cloudW,cloudH,false,true);
+let bloomA = makeRT(bufW,bufH);
+let bloomB = makeRT(bufW,bufH);
+let bloomC = makeRT(Math.ceil(bufW/2),Math.ceil(bufH/2));
+let bloomD = makeRT(Math.ceil(bufW/2),Math.ceil(bufH/2));
+const compRT = new THREE.WebGLRenderTarget(cloudW,cloudH,{
+  type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+  depthBuffer: false, generateMipmaps: false
+});
+compRT.texture.colorSpace = THREE.NoColorSpace;
+
+/* shimmer + motion streak */
+const shadeMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tScene:{value:null}, uRes:{value:new THREE.Vector2()}, uPhase:{value:0},
+    uNoz0:{value:new THREE.Vector3()}, uNoz1:{value:new THREE.Vector3()},
+    uBurn:{value:0}, uStreak:{value:0}, uStreakDir:{value:new THREE.Vector2(1,0)},
+    uNoise:{value:noiseTex}
+  },
+  vertexShader: QUAD_VS,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tScene; uniform vec2 uRes; uniform float uPhase, uBurn, uStreak;
+    uniform vec3 uNoz0, uNoz1; uniform vec2 uStreakDir; uniform highp sampler3D uNoise;
+    varying vec2 vUv;
+    vec3 fetch(vec2 uv){ return texture2D(tScene, clamp(uv, vec2(0.001), vec2(0.999))).rgb; }
+    void main(){
+      vec2 uv = vUv;
+      vec2 px = uv*uRes;
+      // heat shimmer behind nozzles
+      vec2 off = vec2(0.0);
+      for (int k=0;k<2;k++){
+        vec3 nz = k==0 ? uNoz0 : uNoz1;
+        vec2 d = px - nz.xy*uRes;
+        d.x *= uRes.x/uRes.y;
+        float r = length(d);
+        float fall = smoothstep(nz.z, 0.0, r) * uBurn;
+        if (fall > 0.001) {
+          float n1 = texture(uNoise, vec3(uv*22.0, sin(uPhase*6.2832*5.0)*0.3)).a;
+          float n2 = texture(uNoise, vec3(uv*37.0+0.5, cos(uPhase*6.2832*7.0)*0.3)).a;
+          off += (vec2(n1,n2)-0.5) * fall * 5.0 / uRes;
+        }
+      }
+      vec3 c = fetch(uv + off);
+      // pixel motion streak at close pass (hard bright-pixel smear, no averaging blur)
+      if (uStreak > 0.001) {
+        vec2 dir = uStreakDir * 2.2 / uRes;
+        vec3 s = max(fetch(uv+off+dir), fetch(uv+off+dir*2.0));
+        c = mix(c, s, uStreak*0.5);
+      }
+      gl_FragColor = vec4(c, texture2D(tScene, uv + off).a); // carry cloud mask
+    }`
+});
+
+/* bright pass */
+const brightMat = new THREE.ShaderMaterial({
+  uniforms: { tScene:{value:null}, uThresh:{value:1.1} },
+  vertexShader: QUAD_VS,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tScene; uniform float uThresh; varying vec2 vUv;
+    void main(){
+      vec3 c = texture2D(tScene, vUv).rgb;
+      float l = dot(c, vec3(0.2126,0.7152,0.0722));
+      float k = max(l-uThresh, 0.0)/max(l, 1e-4);
+      gl_FragColor = vec4(c*k*k, 1.0);
+    }`
+});
+
+/* separable blur */
+function blurMat(dir){
+  return new THREE.ShaderMaterial({
+    uniforms: { tScene:{value:null}, uDir:{value:dir}, uRes:{value:new THREE.Vector2()} },
+    vertexShader: QUAD_VS,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tScene; uniform vec2 uDir, uRes; varying vec2 vUv;
+      void main(){
+        vec2 px = uDir/uRes;
+        vec3 c = texture2D(tScene, vUv).rgb*0.227027;
+        c += (texture2D(tScene, vUv+px*1.3846).rgb + texture2D(tScene, vUv-px*1.3846).rgb)*0.3162162;
+        c += (texture2D(tScene, vUv+px*3.2308).rgb + texture2D(tScene, vUv-px*3.2308).rgb)*0.0702703;
+        gl_FragColor = vec4(c, 1.0);
+      }`
+  });
+}
+const blurH = blurMat(new THREE.Vector2(1,0));
+const blurV = blurMat(new THREE.Vector2(0,1));
+const blurH2 = blurMat(new THREE.Vector2(2,0));
+const blurV2 = blurMat(new THREE.Vector2(0,2));
+
+/* composite: bloom + ACES + grade + vignette */
+const compMat = new THREE.ShaderMaterial({
+  uniforms: { tScene:{value:null}, tBloom:{value:null}, tBloomWide:{value:null}, uRes:{value:new THREE.Vector2()} },
+  vertexShader: QUAD_VS,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tScene, tBloom, tBloomWide; varying vec2 vUv;
+    vec3 aces(vec3 x){
+      return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+    }
+    void main(){
+      vec3 c = texture2D(tScene, vUv).rgb;
+      c += texture2D(tBloom, vUv).rgb*0.4;
+      c += texture2D(tBloomWide, vUv).rgb*0.25;
+      c *= 1.72; // +0.8 stop exposure — bright golden hour
+      c = aces(c);
+      // gentle teal shadows / gold highlights
+      float l = dot(c, vec3(0.299,0.587,0.114));
+      c *= mix(vec3(0.96,1.0,1.04), vec3(1.0), smoothstep(0.0,0.35,l));
+      c *= mix(vec3(1.0), vec3(1.16,1.0,0.78), smoothstep(0.5,1.0,l));
+      // gentle saturation lift for vivid golden hour (fights ACES desaturation)
+      float l2 = dot(c, vec3(0.299,0.587,0.114));
+      c = mix(vec3(l2), c, 1.18);
+      // vignette
+      vec2 q = vUv-0.5;
+      c *= 1.0 - 0.28*smoothstep(0.45, 1.05, length(q)*1.55);
+      c = pow(max(c, 0.0), vec3(1.0/2.2));
+      gl_FragColor = vec4(c, texture2D(tScene, vUv).a); // carry cloud mask
+    }`
+});
+
+/* final: integer nearest upscale + screen-locked Bayer + 32-level quantize */
+const finalMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tScene:{value:null}, tJetDepth:{value:null}, uScreen:{value:new THREE.Vector2()}, uBuf:{value:new THREE.Vector2()},
+    uScale:{value:1}, uOff:{value:new THREE.Vector2()}, uLetter:{value:LETTERBOX}
+  },
+  vertexShader: QUAD_VS,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tScene; uniform sampler2D tJetDepth; uniform vec2 uScreen, uBuf, uOff; uniform float uScale;
+    uniform vec3 uLetter; varying vec2 vUv;
+    float bayer4(vec2 fc){
+      int x = int(mod(fc.x,4.0)); int y = int(mod(fc.y,4.0));
+      int i = x + y*4;
+      float m[16];
+      m[0]=0.0; m[1]=8.0; m[2]=2.0; m[3]=10.0;
+      m[4]=12.0; m[5]=4.0; m[6]=14.0; m[7]=6.0;
+      m[8]=3.0; m[9]=11.0; m[10]=1.0; m[11]=9.0;
+      m[12]=15.0; m[13]=7.0; m[14]=13.0; m[15]=5.0;
+      return (m[i]+0.5)/16.0;
+    }
+    void main(){
+      vec2 fc = gl_FragCoord.xy;
+      vec2 bp = floor((fc + uOff)/uScale);          // buffer-pixel grid (jet stays pixel-crisp)
+      vec2 uvNeu = (bp + 0.5)/uBuf;
+      vec2 uvLin = (fc + uOff)/uScreen;            // smooth linear coord for the half-res clouds
+      float jm = texture2D(tJetDepth, uvNeu).x < 0.9999 ? 1.0 : 0.0;
+      vec4 sLin = texture2D(tScene, uvLin);
+      vec3 cNeu = texture2D(tScene, uvNeu).rgb;
+      float cm = sLin.a;                           // cloud opacity mask
+      vec3 base = mix(sLin.rgb, cNeu, jm);
+      float d = bayer4(bp);
+      vec3 cq = floor(base*31.0 + d)/31.0;         // Bayer + 32 levels on sky & jet only
+      // clouds: smooth half-res linear colour, NO dither / NO quantize.
+      // plain (unmasked) gaussian fades thin edges & march grain smoothly into
+      // the sky; jet neighbours excluded so the silhouette stays crisp.
+      float cmw = smoothstep(0.0, 1e-5, cm)*(1.0-jm);
+      vec3 cloudCol = sLin.rgb;
+      if (cmw > 0.002) {
+        vec2 px = 4.0/uScreen;
+        vec3 acc = sLin.rgb*2.0; float wsum = 2.0;
+        for (int i=0;i<8;i++){
+          vec2 o = vec2(i==0||i==1||i==2 ? -1.0 : (i==3||i==4 ? 0.0 : 1.0),
+                        i==0||i==3||i==5 ? -1.0 : (i==1||i==6 ? 0.0 : 1.0));
+          float gw = (i==1||i==3||i==4||i==6) ? 2.0 : 1.0;
+          vec2 nuv = uvLin + o*px;
+          float jn = texture2D(tJetDepth, nuv).x < 0.9999 ? 0.0 : 1.0;
+          float w = gw * jn;
+          acc += texture2D(tScene, nuv).rgb*w; wsum += w;
+        }
+        cloudCol = acc/wsum;
+      }
+      vec3 outc = mix(cq, cloudCol, cmw);
+      gl_FragColor = vec4(outc, 1.0);
+    }`
+});
+
+/* ---------------- resize ---------------- */
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  screenW = size.x; screenH = size.y;
+  bufH = BUF_H;
+  scale = Math.max(1, Math.round(screenH/bufH));
+  bufW = Math.max(160, Math.ceil(screenW/scale));
+  bufH = Math.max(120, Math.ceil(screenH/scale));
+  // buffer*scale >= window: centre-crop the overflow so the image fills edge to edge
+  offX = Math.floor((bufW*scale - screenW)/2);
+  offY = Math.floor((bufH*scale - screenH)/2);
+  cloudW = Math.max(320, Math.ceil(screenW/2));
+  cloudH = Math.max(240, Math.ceil(screenH/2));
+  camera.aspect = bufW/bufH;
+  camera.updateProjectionMatrix();
+  sceneRT.setSize(cloudW,cloudH);
+  jetRT.setSize(bufW,bufH);
+  shadeRT.setSize(cloudW,cloudH);
+  bloomA.setSize(bufW,bufH); bloomB.setSize(bufW,bufH);
+  bloomC.setSize(Math.ceil(bufW/2),Math.ceil(bufH/2));
+  bloomD.setSize(Math.ceil(bufW/2),Math.ceil(bufH/2));
+  compRT.setSize(cloudW,cloudH);
+  shadeMat.uniforms.uRes.value.set(cloudW,cloudH);
+  blurH.uniforms.uRes.value.set(bufW,bufH);
+  blurV.uniforms.uRes.value.set(bufW,bufH);
+  blurH2.uniforms.uRes.value.set(Math.ceil(bufW/2),Math.ceil(bufH/2));
+  blurV2.uniforms.uRes.value.set(Math.ceil(bufW/2),Math.ceil(bufH/2));
+  finalMat.uniforms.uScreen.value.set(screenW,screenH);
+  finalMat.uniforms.uBuf.value.set(bufW,bufH);
+  finalMat.uniforms.uScale.value = scale;
+  finalMat.uniforms.uOff.value.set(offX,offY);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ============================================================
+   SOUND — WebAudio, starts on first click
+   ============================================================ */
+let audio = null;
+function startAudio(){
+  if (audio) return;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ctx.createGain(); master.gain.value = 0.55; master.connect(ctx.destination);
+  // noise buffer
+  const nb = ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate);
+  const nd = nb.getChannelData(0);
+  let last = 0;
+  for (let i=0;i<nd.length;i++){ const w = Math.random()*2-1; last = (last+0.02*w)/1.02; nd[i] = w*0.6 + last*3.0; }
+  const noiseSrc = ctx.createBufferSource(); noiseSrc.buffer = nb; noiseSrc.loop = true; noiseSrc.start();
+  // wind
+  const windBP = ctx.createBiquadFilter(); windBP.type='bandpass'; windBP.frequency.value=480; windBP.Q.value=0.5;
+  const windGain = ctx.createGain(); windGain.gain.value = 0.16;
+  noiseSrc.connect(windBP).connect(windGain).connect(master);
+  const windLFO = ctx.createOscillator(); windLFO.frequency.value = 2/LOOP;
+  const windLFOg = ctx.createGain(); windLFOg.gain.value = 0.05;
+  windLFO.connect(windLFOg).connect(windGain.gain); windLFO.start();
+  // engine whine (Doppler driven)
+  const engOsc = ctx.createOscillator(); engOsc.type='sawtooth'; engOsc.frequency.value=140;
+  const engOsc2 = ctx.createOscillator(); engOsc2.type='sawtooth'; engOsc2.frequency.value=281;
+  const engBP = ctx.createBiquadFilter(); engBP.type='bandpass'; engBP.frequency.value=900; engBP.Q.value=1.6;
+  const engGain = ctx.createGain(); engGain.gain.value = 0.0;
+  const engGain2 = ctx.createGain(); engGain2.gain.value = 0.35;
+  engOsc.connect(engBP); engOsc2.connect(engGain2).connect(engBP);
+  engBP.connect(engGain).connect(master);
+  engOsc.start(); engOsc2.start();
+  // engine roar
+  const roarLP = ctx.createBiquadFilter(); roarLP.type='lowpass'; roarLP.frequency.value=260;
+  const roarGain = ctx.createGain(); roarGain.gain.value = 0.0;
+  noiseSrc.connect(roarLP).connect(roarGain).connect(master);
+  // afterburner rumble
+  const abLP = ctx.createBiquadFilter(); abLP.type='lowpass'; abLP.frequency.value=110;
+  const abGain = ctx.createGain(); abGain.gain.value = 0.0;
+  noiseSrc.connect(abLP).connect(abGain).connect(master);
+  const abSub = ctx.createOscillator(); abSub.type='sine'; abSub.frequency.value=44;
+  const abSubG = ctx.createGain(); abSubG.gain.value = 0.0;
+  abSub.connect(abSubG).connect(master); abSub.start();
+  // ambient pad
+  const padLP = ctx.createBiquadFilter(); padLP.type='lowpass'; padLP.frequency.value=750;
+  const padGain = ctx.createGain(); padGain.gain.value = 0.045;
+  padLP.connect(padGain).connect(master);
+  for (const [f, det] of [[110,0],[164.81,3],[220,-4],[329.63,2]]) {
+    const o = ctx.createOscillator(); o.type='triangle'; o.frequency.value=f; o.detune.value=det;
+    const g = ctx.createGain(); g.gain.value = 0.25;
+    o.connect(g).connect(padLP); o.start();
+  }
+  audio = { ctx, engOsc, engOsc2, engGain, roarGain, abGain, abSubG, windGain };
+}
+window.addEventListener('pointerdown', () => { startAudio(); if (audio && audio.ctx.state === 'suspended') audio.ctx.resume(); }, { once:false });
+
+/* ============================================================
+   ANIMATION
+   ============================================================ */
+const clock = new THREE.Clock();
+let elapsed = 0, frame = 0;
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+const nozzleWorld = [new THREE.Vector3(), new THREE.Vector3()];
+
+function updateTrails(fs, strength){
+  // analytic trail: sample the flight path backwards in time (deterministic,
+  // identical in live and ?t= freeze mode, seamless across the loop)
+  const camP = camera.position;
+  const dtSample = 1.0/(TRAIL_N-1);
+  const tips = [[trailL, tipLocalL],[trailR, tipLocalR]];
+  for (const [meshTrail, tipLocal] of tips) {
+    const posA = meshTrail.geometry.attributes.position;
+    const norA = meshTrail.geometry.attributes.normal;
+    const ageA = meshTrail.geometry.attributes.aAge;
+    let prev = null;
+    for (let i=0;i<TRAIL_N;i++){
+      const pastT = ((elapsed - i*dtSample) % LOOP + LOOP) % LOOP;
+      const pst = flightState(pastT);
+      const p = tipLocal.clone().applyQuaternion(pst.q).add(pst.pos);
+      const dir = prev ? _v.copy(prev).sub(p) : _v.copy(pst.tan);
+      if (dir.lengthSq() < 1e-8) dir.copy(pst.tan);
+      dir.normalize();
+      const view = _v2.copy(camP).sub(p).normalize();
+      const side = _v3.crossVectors(dir, view).normalize();
+      const age = i/(TRAIL_N-1);
+      const w = (0.05 + age*0.28) * strength;
+      posA.setXYZ(i*2,   p.x - side.x*w, p.y - side.y*w, p.z - side.z*w);
+      posA.setXYZ(i*2+1, p.x + side.x*w, p.y + side.y*w, p.z + side.z*w);
+      norA.setXYZ(i*2, side.x, side.y, side.z);
+      norA.setXYZ(i*2+1, side.x, side.y, side.z);
+      ageA.setX(i*2, age); ageA.setX(i*2+1, age);
+      prev = p;
+    }
+    posA.needsUpdate = norA.needsUpdate = ageA.needsUpdate = true;
+    meshTrail.visible = strength > 0.01;
+  }
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (FREEZE === null) elapsed += dt;
+  else elapsed = FREEZE;
+  const t = ((elapsed % LOOP) + LOOP) % LOOP;
+  const u = t/LOOP;
+  const phase = u;
+  const fs = flightState(t);
+
+  /* jet transform */
+  jet.position.copy(fs.pos);
+  jet.quaternion.copy(fs.q);
+  ailR.rotation.x = -fs.ail; ailL.rotation.x = fs.ail;
+  stabR.rotation.x = fs.stab; stabL.rotation.x = fs.stab;
+  jet.updateMatrixWorld(true);
+
+  /* afterburner */
+  burnUniforms.uBurn.value = fs.burn;
+  burnUniforms.uPhase.value = phase;
+  const coneScale = 0.35 + fs.burn*0.9;
+  for (const c of burnCones) { c.scale.set(1, 1, coneScale); c.visible = fs.burn > 0.02; }
+  for (const d of burnDisks) d.visible = true;
+
+  /* vapor */
+  vaporUniforms.uEnv.value = fs.vapor;
+  vaporUniforms.uPhase.value = phase;
+  coneUniforms.uEnv.value = fs.burst;
+  coneUniforms.uPhase.value = phase;
+  vaporCone.visible = fs.burst > 0.01;
+  updateTrails(fs, fs.trail);
+
+  /* camera: chase plane, steady forward, subtle track/shake/bob (loop-periodic) */
+  const bobX = 0.35*Math.sin(phase*Math.PI*2*2) + 0.18*Math.sin(phase*Math.PI*2*5+1.3);
+  const bobY = 0.30*Math.sin(phase*Math.PI*2*3+0.7) + 0.12*Math.sin(phase*Math.PI*2*7);
+  const shX = fs.shake*0.5*Math.sin(phase*Math.PI*2*41);
+  const shY = fs.shake*0.45*Math.sin(phase*Math.PI*2*53+1.0);
+  camera.position.set(bobX+shX, 25+bobY+shY, 0);
+  const lookTarget = _v.set(0, 37, -120).lerp(fs.pos, fs.track*0.45);
+  camera.lookAt(lookTarget);
+  camera.rotateZ(-0.055*fs.track + 0.012*Math.sin(phase*Math.PI*2*2+0.4) + fs.shake*0.02*Math.sin(phase*Math.PI*2*47));
+  camera.updateMatrixWorld(true);
+
+  /* sun light follows jet for tight shadows */
+  sunLight.position.copy(fs.pos).addScaledVector(sunDir, 90);
+  sunLight.target.position.copy(fs.pos);
+  rimLight.position.copy(fs.pos).addScaledVector(sunDir, -80).add(_v2.set(0,40,0));
+  rimLight.target.position.copy(fs.pos);
+  rimLight.target.updateMatrixWorld();
+
+  /* cloud uniforms */
+  cloudUniforms.uScroll.value = 6.0*Math.sin(phase*Math.PI*2);   // slow wind < 2 m/s, seamless
+  cloudUniforms.uScrollW.value = 6.0*Math.sin(phase*Math.PI*2);
+  cloudUniforms.uPhase.value = phase;
+  cloudUniforms.uJet.value.copy(fs.pos);
+  cloudUniforms.uJetX.value.set(1,0,0).applyQuaternion(fs.q);
+  cloudUniforms.uJetY.value.set(0,1,0).applyQuaternion(fs.q);
+  cloudUniforms.uJetZ.value.set(0,0,1).applyQuaternion(fs.q);
+  cloudUniforms.uPunch.value = fs.punch;
+
+  /* glint: specular alignment sweep during the roll */
+  const viewDir = _v.copy(camera.position).sub(fs.pos).normalize();
+  const half = _v2.copy(sunDir).add(viewDir).normalize();
+  const upW = _v3.set(0,1,0).applyQuaternion(fs.q);
+  const sideW = new THREE.Vector3(1,0,0).applyQuaternion(fs.q);
+  const a1 = Math.pow(Math.max(upW.dot(half),0), 2.5);
+  const a2 = Math.pow(Math.max(sideW.dot(half),0), 2.5)*0.7;
+  const glintS = Math.min(a1+a2, 1.2);
+  // star travels along the fuselage/wing edge as the jet rolls through the sun
+  const sweep = clamp01(sideW.dot(half)*0.5 + 0.5);
+  glint.position.copy(fs.pos).addScaledVector(upW, 0.5).addScaledVector(fs.tan, 3.0 - 5.0*sweep);
+  glint.quaternion.copy(camera.quaternion);
+  const gs = 0.6 + 3.5*glintS;
+  glint.scale.set(gs, gs, 1);
+  glintMat.opacity = clamp01(glintS*2.0);
+  glint.visible = glintS > 0.02;
+
+  /* env cubemap refresh every 5 frames */
+  if (frame % 5 === 0) {
+    jet.visible = false;
+    glint.visible = false;
+    trailL.visible = trailR.visible = false;
+    vaporCone.visible = false;
+    for (const c of burnCones) c.visible = false;
+    skyMesh.visible = true;
+    cubeCam.position.copy(fs.pos);
+    cubeCam.update(renderer, scene);
+    jet.visible = true;
+    glint.visible = glintS > 0.02;
+    trailL.visible = trailR.visible = fs.trail > 0.01;
+    vaporCone.visible = fs.burst > 0.01;
+    for (const c of burnCones) c.visible = fs.burn > 0.02;
+  }
+
+  /* nozzle screen positions for heat shimmer */
+  for (let k=0;k<2;k++){
+    nozzleWorld[k].set((k?0.78:-0.78), -0.05, -11.2).applyMatrix4(jet.matrixWorld);
+    _v.copy(nozzleWorld[k]).project(camera);
+    const behind = _v.z > 1 || _v.z < -1;
+    const uvx = (_v.x+1)/2, uvy = (_v.y+1)/2;
+    const u = k ? shadeMat.uniforms.uNoz1 : shadeMat.uniforms.uNoz0;
+    u.value.set(uvx, uvy, behind ? 0 : 0.055);
+  }
+  shadeMat.uniforms.uBurn.value = fs.burn;
+  shadeMat.uniforms.uPhase.value = phase;
+  shadeMat.uniforms.uStreak.value = fs.streak;
+  // streak direction: screen-space cloud flow (camera flies -Z, clouds move +Z relative)
+  shadeMat.uniforms.uStreakDir.value.set(0.85, 0.15).normalize();
+
+  /* ---- render pipeline ---- */
+  // pass 1: jet + effects only, into jetRT (colour + depth)
+  skyMesh.visible = false;
+  renderer.setRenderTarget(jetRT);
+  renderer.render(scene, camera);
+  // pass 2: volumetric clouds + sky composited over the jet via transmittance
+  skyMesh.visible = true;
+  cloudCompMat.uniforms.tJetColor.value = jetRT.texture;
+  cloudCompMat.uniforms.tJetDepth.value = jetDepthTex;
+  cloudCompMat.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
+  cloudCompMat.uniforms.uInvView.value.copy(camera.matrixWorld);
+  runPass(cloudCompMat, sceneRT);
+
+  shadeMat.uniforms.tScene.value = sceneRT.texture;
+  runPass(shadeMat, shadeRT);
+
+  brightMat.uniforms.tScene.value = shadeRT.texture;
+  runPass(brightMat, bloomA);
+  blurH.uniforms.tScene.value = bloomA.texture;
+  runPass(blurH, bloomB);
+  blurV.uniforms.tScene.value = bloomB.texture;
+  runPass(blurV, bloomA);
+  // wide bloom at half buffer res (still pixelated)
+  blurH2.uniforms.tScene.value = bloomA.texture;
+  runPass(blurH2, bloomC);
+  blurV2.uniforms.tScene.value = bloomC.texture;
+  runPass(blurV2, bloomD);
+
+  compMat.uniforms.tScene.value = shadeRT.texture;
+  compMat.uniforms.tBloom.value = bloomA.texture;
+  compMat.uniforms.tBloomWide.value = bloomD.texture;
+  runPass(compMat, compRT);
+
+  finalMat.uniforms.tScene.value = compRT.texture;
+  finalMat.uniforms.tJetDepth.value = jetDepthTex;
+  runPass(finalMat, null);
+
+  /* ---- audio ---- */
+  if (audio) {
+    const dist = fs.pos.distanceTo(camera.position);
+    const ahead = path.getPoint((u+0.002)%1);
+    const behind = path.getPoint((u-0.002+1)%1);
+    const dNow = fs.pos.distanceTo(camera.position);
+    const dNext = ahead.distanceTo(camera.position);
+    const dPrev = behind.distanceTo(camera.position);
+    const vRad = (dNext - dPrev)/(0.004*LOOP); // units/s, + = receding
+    const doppler = Math.min(Math.max(343/(343 + vRad*2.2), 0.6), 1.8);
+    const prox = clamp01(1 - dist/300);
+    const ac = audio.ctx;
+    audio.engOsc.frequency.setTargetAtTime(140*doppler*(1+fs.burn*0.25), ac.currentTime, 0.05);
+    audio.engOsc2.frequency.setTargetAtTime(281*doppler, ac.currentTime, 0.05);
+    audio.engGain.gain.setTargetAtTime(0.02 + prox*0.16, ac.currentTime, 0.08);
+    audio.roarGain.gain.setTargetAtTime(0.03 + prox*0.22 + fs.burn*0.1, ac.currentTime, 0.1);
+    audio.abGain.gain.setTargetAtTime(fs.burn*0.5, ac.currentTime, 0.08);
+    audio.abSubG.gain.setTargetAtTime(fs.burn*0.22, ac.currentTime, 0.08);
+  }
+
+  frame++;
+  window.__sunstrike.frames = frame;
+  window.__sunstrike.t = t;
+  window.__sunstrike.ready = true;
+}
+animate();
+</script>
+</body>
+</html>
