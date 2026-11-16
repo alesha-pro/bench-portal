@@ -1,0 +1,4018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CANDLE AND WINE</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #08060a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  #hint {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    letter-spacing: 0.08em;
+    color: rgba(235, 216, 192, 0.62);
+    text-shadow: 0 1px 0 #100b11;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: opacity 0.9s ease-out;
+    opacity: 1;
+  }
+  #hint.fade {
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<div id="hint">drag candles &middot; click flame &middot; wheel decanter &middot; D draught</div>
+<script>
+(() => {
+  'use strict';
+
+  const TARGET_W = 640;
+  const TARGET_H = 360;
+  const PHOTON_COUNT = 61440; // ~60k photons split across lit flames every frame
+  const SHADOW_SIZE = 512;    // 512x512 per hemisphere in dual-paraboloid atlas (3072x512 or 1536x1024)
+
+  // Fade out tiny hint after 4 seconds
+  const hintEl = document.getElementById('hint');
+  setTimeout(() => { if (hintEl) hintEl.classList.add('fade'); }, 3200);
+  setTimeout(() => { if (hintEl && hintEl.parentNode) hintEl.parentNode.removeChild(hintEl); }, 4200);
+
+  // =========================================================================
+  // 1. PROCEDURAL 48-COLOUR CARAVAGGIO PALETTE (generated in code, never #000)
+  // =========================================================================
+  function buildPalette48() {
+    const hexList = [
+      // Shadow Ramp (12): near-black brown, bruised plum, deep olive, cold slate (never pure black)
+      0x100b11, 0x161019, 0x1f1524, 0x2b1c31, 0x3a2640, // bruised plum ramp
+      0x12151f, 0x1a202e, 0x252e40, 0x344157,           // cold slate far corners & cool rim
+      0x161711, 0x22251a, 0x323626,                     // deep Caravaggio olive-umber
+
+      // Deep Warm Ramp (20): umber, oak, ochre, brass, candle gold, wax cream, shadowed-to-lit linen
+      0x1c120d, 0x2a1a12, 0x3c2519, 0x513321, 0x68432a, // deep burnt umber & aged oak
+      0x7e5331, 0x976639, 0xb27c43, 0xcc954f,           // warm ochre & bread crust / antique brass
+      0xe0ae5c, 0xeec56f, 0xf8db87,                     // candle gold & bright brass specular
+      0x483b43, 0x65555b, 0x867576, 0xa89690,           // shadowed warm linen fold bridge
+      0xc9b9a6, 0xded0bc, 0xefe3d0, 0xf9f0df,           // wax cream & warm candlelit linen
+
+      // Wine & Caustic Ramp (12): deep garnet, claret, glowing ruby, blood red, rose pink
+      0x1b080e, 0x2d0b15, 0x460f1d, 0x631325,           // deep almost-black garnet to claret
+      0x84182c, 0xa61e31, 0xc82838, 0xe53841,           // blood red & glowing ruby
+      0xf25651, 0xeb7878, 0xf4a19f, 0xfbd0cb,           // bright caustic hotspot & rose pink
+
+      // Flame & Accent Ramp (4): faint blue base, vivid flame orange, incandescent flame core
+      0x2c4b88, 0x5682c4, 0xf36d21, 0xfff8e7
+    ];
+    const data = new Float32Array(48 * 3);
+    for (let i = 0; i < 48; i++) {
+      const c = hexList[i];
+      data[i * 3 + 0] = ((c >> 16) & 255) / 255;
+      data[i * 3 + 1] = ((c >> 8) & 255) / 255;
+      data[i * 3 + 2] = (c & 255) / 255;
+    }
+    return data;
+  }
+  const PALETTE_48 = buildPalette48();
+
+  // =========================================================================
+  // 2. DETERMINISTIC PRNG & NOISE HELPERS
+  // =========================================================================
+  let rngState = 0x6d2b79f5;
+  function rand() {
+    rngState = (rngState + 0x6d2b79f5) | 0;
+    let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function randRange(a, b) { return a + (b - a) * rand(); }
+  function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+  function smoothstep(e0, e1, x) {
+    const t = clamp((x - e0) / (e1 - e0), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+  function hash2(x, y) {
+    const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+    return s - Math.floor(s);
+  }
+  function vnoise2(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    const a = hash2(ix, iy), b = hash2(ix + 1, iy);
+    const c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  }
+  function fbm2(x, y) {
+    return 0.55 * vnoise2(x, y) + 0.30 * vnoise2(x * 2.13 + 5.2, y * 2.13 + 1.7) + 0.15 * vnoise2(x * 4.41 - 2.8, y * 4.41 + 7.1);
+  }
+
+  // =========================================================================
+  // 3. SHARED SCENE LAYOUT, TABLE/CLOTH HEIGHTFIELD & VESSEL SPECS
+  // =========================================================================
+  // Analytic vessel positions (world coordinates, table surface near y = 0)
+  const DECANTER = { x: -0.60, z: -0.10, rMax: 0.57, h: 1.54, colR: 0.56 };
+  const GLASS1   = { x:  0.34, z:  0.24, rMax: 0.29, h: 1.08, colR: 0.28 }; // Half-full
+  const GLASS2   = { x:  0.96, z: -0.16, rMax: 0.27, h: 0.98, colR: 0.26 }; // Almost empty + film/legs
+  const BREAD    = { x: -1.46, z:  0.60, colR: 0.46 };
+  const GRAPES   = { x: -0.02, z:  0.76, colR: 0.30 };
+  const NAPKIN   = { x:  1.54, z:  0.68, colR: 0.34 };
+
+  // Cloth hem on right side exposes aged oak table planks
+  function clothRightEdge(z) {
+    return 2.18 + 0.10 * Math.sin(z * 1.55 + 0.4) + 0.04 * Math.sin(z * 3.7);
+  }
+  function isOnCloth(x, z) {
+    return x >= -3.72 && x <= clothRightEdge(z) && z >= -2.42;
+  }
+
+  // Exact cloth fold heightfield (matched in GLSL for caustics & glass placement!)
+  function clothFoldHeight(x, z) {
+    if (!isOnCloth(x, z)) return 0.0;
+    const edgeFade = smoothstep(-3.72, -3.45, x) * smoothstep(clothRightEdge(z), clothRightEdge(z) - 0.18, x) * smoothstep(-2.42, -2.15, z);
+    // Two pronounced soft Caravaggio folds so candles behind them glow translucently through linen!
+    const dFold1 = (x + 1.45) * 0.78 - (z + 0.15) * 0.62;
+    const fold1 = 0.115 * Math.exp(-dFold1 * dFold1 * 6.5) * smoothstep(1.35, -0.9, z);
+    const dFold2 = (x - 1.18) * 0.80 + (z + 0.22) * 0.60;
+    const fold2 = 0.105 * Math.exp(-dFold2 * dFold2 * 7.0) * smoothstep(1.25, -1.0, z);
+    const dFold3 = (x + 0.22) * 0.55 + (z - 1.18) * 0.83;
+    const fold3 = 0.055 * Math.exp(-dFold3 * dFold3 * 9.0);
+    const ripples = 0.014 * Math.sin(x * 3.1 + z * 1.9) + 0.009 * Math.cos(x * 5.3 - z * 3.4);
+
+    // Flatten cloth slightly under heavy glassware so vessels rest flush
+    const d0 = Math.hypot(x - DECANTER.x, z - DECANTER.z);
+    const d1 = Math.hypot(x - GLASS1.x, z - GLASS1.z);
+    const d2 = Math.hypot(x - GLASS2.x, z - GLASS2.z);
+    const pad = smoothstep(0.36, 0.72, d0) * smoothstep(0.24, 0.48, d1) * smoothstep(0.22, 0.45, d2);
+
+    return 0.018 + edgeFade * pad * Math.max(0.0, fold1 + fold2 + fold3 + ripples + 0.016);
+  }
+
+  function getTableSurfaceY(x, z) {
+    if (z > 2.16) {
+      // Front edge drape of tablecloth
+      const over = z - 2.16;
+      if (isOnCloth(x, 2.16)) {
+        const pleat = 0.045 * Math.sin(x * 7.2 + 0.5) + 0.025 * Math.sin(x * 13.5);
+        return clothFoldHeight(x, 2.16) - over * over * 3.2 - over * 0.35 + pleat * smoothstep(0.0, 0.15, over);
+      }
+      return -over * 2.5;
+    }
+    return clothFoldHeight(x, z);
+  }
+
+  function getTableNormal(x, z) {
+    const eps = 0.025;
+    const hL = getTableSurfaceY(x - eps, z);
+    const hR = getTableSurfaceY(x + eps, z);
+    const hD = getTableSurfaceY(x, z - eps);
+    const hU = getTableSurfaceY(x, z + eps);
+    let nx = hL - hR, ny = 2 * eps, nz = hD - hU;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    return [nx / len, ny / len, nz / len];
+  }
+
+  DECANTER.y = clothFoldHeight(DECANTER.x, DECANTER.z);
+  GLASS1.y   = clothFoldHeight(GLASS1.x, GLASS1.z);
+  GLASS2.y   = clothFoldHeight(GLASS2.x, GLASS2.z);
+
+  // Three candles of different heights in brass holders
+  // Default positions showcase: Candle 0 behind decanter (glowing ruby edge + forward caustic pool),
+  // Candle 1 behind glasses, Candle 2 to the left side for long triple shadows & raking light
+  const candles = [
+    {
+      id: 0, x: -0.62, z: -0.96, baseR: 0.22, holderH: 0.21, waxR: 0.094, waxH: 0.37,
+      lit: 1.0, targetLit: 1.0, vx: 0, vz: 0, leanX: 0, leanZ: 0, leanVX: 0, leanVZ: 0,
+      seed: 1.37, puffTime: -10, puffX: 0, puffY: 0, puffZ: 0
+    },
+    {
+      id: 1, x:  0.68, z: -0.96, baseR: 0.23, holderH: 0.34, waxR: 0.090, waxH: 0.56,
+      lit: 1.0, targetLit: 1.0, vx: 0, vz: 0, leanX: 0, leanZ: 0, leanVX: 0, leanVZ: 0,
+      seed: 5.91, puffTime: -10, puffX: 0, puffY: 0, puffZ: 0
+    },
+    {
+      id: 2, x: -1.76, z:  0.08, baseR: 0.25, holderH: 0.14, waxR: 0.108, waxH: 0.28,
+      lit: 1.0, targetLit: 1.0, vx: 0, vz: 0, leanX: 0, leanZ: 0, leanVX: 0, leanVZ: 0,
+      seed: 11.23, puffTime: -10, puffX: 0, puffY: 0, puffZ: 0
+    }
+  ];
+  for (const c of candles) {
+    c.y = getTableSurfaceY(c.x, c.z);
+    c.wickH = c.holderH + c.waxH + 0.055;
+  }
+
+  // Material IDs for splats
+  const MAT_OAK    = 0;
+  const MAT_LINEN  = 1;
+  const MAT_WALL   = 2;
+  const MAT_BRASS  = 3;
+  const MAT_WAX    = 4;
+  const MAT_BREAD  = 5;
+  const MAT_GRAPE  = 6;
+  const MAT_FLAME  = 7;
+  const MAT_SMOKE  = 8;
+  const MAT_DUST   = 9;
+
+  // =========================================================================
+  // 4. PROCEDURAL 3D GAUSSIAN SPLAT BUILDER (with 3x3 Covariance & Shortest Axis Normal)
+  // =========================================================================
+  const MAX_SPLATS = 65536;
+  const TEX_SPLAT_STRIDE = 5; // 5 RGBA32F texels per splat -> 1280 x 256 texture
+  const TEX_SPLAT_COLS = 256;
+  const TEX_SPLAT_W = TEX_SPLAT_COLS * TEX_SPLAT_STRIDE; // 1280
+  const TEX_SPLAT_H = 256;
+
+  const splatTexData = new Float32Array(MAX_SPLATS * TEX_SPLAT_STRIDE * 4);
+  const sortMetaData = new Float32Array(MAX_SPLATS * 4); // x, y, z, encoded(objId, seed)
+  const shadowCasterIndices = [];
+  let splatCount = 0;
+
+  // Build orthonormal frame [T, B, N] from shortest-axis normal N and tangent hint, then Sigma = R * diag(st^2, sb^2, sn^2) * R^T
+  function addSplat(px, py, pz, nx, ny, nz, st, sb, sn, txHint, tyHint, tzHint, r, g, b, opacity, objId, matType, specRough, seed, castsShadow) {
+    if (splatCount >= MAX_SPLATS) return;
+    const nLen = Math.hypot(nx, ny, nz) || 1;
+    nx /= nLen; ny /= nLen; nz /= nLen;
+
+    // Tangent orthogonal to N
+    let dotNT = nx * txHint + ny * tyHint + nz * tzHint;
+    let tx = txHint - dotNT * nx;
+    let ty = tyHint - dotNT * ny;
+    let tz = tzHint - dotNT * nz;
+    let tLen = Math.hypot(tx, ty, tz);
+    if (tLen < 1e-4) {
+      if (Math.abs(ny) < 0.9) { tx = -nz; ty = 0; tz = nx; }
+      else { tx = 1; ty = 0; tz = 0; }
+      tLen = Math.hypot(tx, ty, tz) || 1;
+    }
+    tx /= tLen; ty /= tLen; tz /= tLen;
+
+    // Bitangent B = N x T
+    const bx = ny * tz - nz * ty;
+    const by = nz * tx - nx * tz;
+    const bz = nx * ty - ny * tx;
+
+    // Ensure sn is strictly shortest axis so N is the exact shortest covariance eigenvector
+    const minPlanar = Math.min(st, sb);
+    const snSafe = Math.min(sn, minPlanar * 0.65);
+    const vt = st * st, vb = sb * sb, vn = snSafe * snSafe;
+
+    const cxx = vt * tx * tx + vb * bx * bx + vn * nx * nx;
+    const cxy = vt * tx * ty + vb * bx * by + vn * nx * ny;
+    const cxz = vt * tx * tz + vb * bx * bz + vn * nx * nz;
+    const cyy = vt * ty * ty + vb * by * by + vn * ny * ny;
+    const cyz = vt * ty * tz + vb * by * bz + vn * ny * nz;
+    const czz = vt * tz * tz + vb * bz * bz + vn * nz * nz;
+
+    const idx = splatCount++;
+    const base = idx * 20;
+    // Texel 0: local/world pos + objId
+    splatTexData[base + 0] = px;
+    splatTexData[base + 1] = py;
+    splatTexData[base + 2] = pz;
+    splatTexData[base + 3] = objId;
+    // Texel 1: cov upper
+    splatTexData[base + 4] = cxx;
+    splatTexData[base + 5] = cxy;
+    splatTexData[base + 6] = cxz;
+    splatTexData[base + 7] = cyy;
+    // Texel 2: cov lower + nx, ny
+    splatTexData[base + 8]  = cyz;
+    splatTexData[base + 9]  = czz;
+    splatTexData[base + 10] = nx;
+    splatTexData[base + 11] = ny;
+    // Texel 3: nz + linear albedo RGB
+    splatTexData[base + 12] = nz;
+    splatTexData[base + 13] = r;
+    splatTexData[base + 14] = g;
+    splatTexData[base + 15] = b;
+    // Texel 4: opacity, matType, specRough, phaseSeed
+    splatTexData[base + 16] = opacity;
+    splatTexData[base + 17] = matType;
+    splatTexData[base + 18] = specRough;
+    splatTexData[base + 19] = seed;
+
+    const mBase = idx * 4;
+    sortMetaData[mBase + 0] = px;
+    sortMetaData[mBase + 1] = py;
+    sortMetaData[mBase + 2] = pz;
+    sortMetaData[mBase + 3] = objId + seed * 0.001; // integer part = objId, frac = seed
+
+    if (castsShadow) shadowCasterIndices.push(idx);
+  }
+
+  function buildSceneSplats() {
+    // 1. BACK WALL WITH DARK PAINTED PANEL (z = -2.85)
+    // Recessed Caravaggio wainscoting panel with bevelled wood/plaster moulding
+    const wallZ = -2.86;
+    const rowsW = 76, colsW = 126;
+    for (let j = 0; j < rowsW; j++) {
+      const y = -0.9 + (j + 0.5) / rowsW * 4.5;
+      for (let i = 0; i < colsW; i++) {
+        const x = -5.2 + (i + 0.5) / colsW * 10.4;
+        const jx = x + randRange(-0.025, 0.025);
+        const jy = y + randRange(-0.020, 0.020);
+        // Painted panel frame bounds: inner panel x in [-3.1, 2.9], y in [0.25, 2.85]
+        const dxPanel = Math.max(Math.abs(jx + 0.1) - 2.95, 0);
+        const dyPanel = Math.max(Math.abs(jy - 1.55) - 1.25, 0);
+        const dFrame = Math.max(Math.abs(jx + 0.1) - 2.95, Math.abs(jy - 1.55) - 1.25);
+        let zOff = 0.0, nx = 0, ny = 0, nz = 1;
+        let shade = 1.0;
+        if (Math.abs(dFrame) < 0.11) {
+          // Moulding bevel
+          const s = dFrame / 0.11;
+          zOff = 0.045 * Math.cos(s * Math.PI * 0.5);
+          const slope = -0.35 * Math.sin(s * Math.PI * 0.5);
+          if (Math.abs(Math.abs(jx + 0.1) - 2.95) > Math.abs(Math.abs(jy - 1.55) - 1.25)) {
+            nx = Math.sign(jx + 0.1) * slope;
+          } else {
+            ny = Math.sign(jy - 1.55) * slope;
+          }
+          shade = 1.18;
+        } else if (dFrame < -0.11) {
+          zOff = -0.025; // recessed dark painted panel
+          shade = 0.84;
+        } else {
+          zOff = 0.015;
+        }
+        const mottle = fbm2(jx * 1.4 + 3.1, jy * 1.4 - 1.2);
+        const oliveMix = fbm2(jx * 0.7 - 4.0, jy * 0.8 + 2.3);
+        const r = (0.055 + 0.032 * mottle + 0.012 * oliveMix) * shade;
+        const g = (0.048 + 0.030 * mottle + 0.018 * oliveMix) * shade;
+        const b = (0.052 + 0.028 * mottle + 0.008 * (1 - oliveMix)) * shade;
+        addSplat(jx, jy, wallZ + zOff, nx, ny, nz, 0.072, 0.056, 0.012, 1, 0, 0, r, g, b, 1.0, 0, MAT_WALL, 0.15, rand(), false);
+      }
+    }
+
+    // 2. OLD OAK TABLE (exposed right planks, back/left edges, and front bevelled apron)
+    // Top oak surface where cloth doesn't cover + margin under cloth edge
+    for (let j = 0; j < 78; j++) {
+      const z = -2.65 + (j + 0.5) / 78 * 4.85;
+      for (let i = 0; i < 118; i++) {
+        const x = -4.05 + (i + 0.5) / 118 * 8.10;
+        // Skip interior deep under cloth to focus splat budget on visible surfaces
+        if (x > -3.50 && x < clothRightEdge(z) - 0.18 && z > -2.20 && z < 2.05) continue;
+        const jx = x + randRange(-0.022, 0.022);
+        const jz = z + randRange(-0.020, 0.020);
+        // Plank seams every ~0.82 units in z
+        const plankCoord = (jz + 3.0) / 0.82;
+        const plankId = Math.floor(plankCoord);
+        const seamDist = Math.min(plankCoord - plankId, 1 - (plankCoord - plankId));
+        const seamDip = seamDist < 0.04 ? -0.012 * (1 - seamDist / 0.04) : 0;
+        const grain = fbm2(jx * 1.3 + plankId * 7.7, jz * 14.0 + Math.sin(jx * 2.1) * 1.6);
+        const ring = 0.5 + 0.5 * Math.sin( grain * 11.0 + jx * 1.8 );
+        const plankTone = 0.82 + 0.32 * hash2(plankId, 3.1);
+        const seamDark = seamDist < 0.045 ? 0.45 + 0.55 * (seamDist / 0.045) : 1.0;
+        const r = (0.115 + 0.095 * grain + 0.035 * ring) * plankTone * seamDark;
+        const g = (0.064 + 0.054 * grain + 0.020 * ring) * plankTone * seamDark;
+        const b = (0.036 + 0.028 * grain + 0.010 * ring) * plankTone * seamDark;
+        const nx = (seamDist < 0.04 ? (plankCoord - plankId < 0.5 ? -0.2 : 0.2) : 0) + randRange(-0.03, 0.03);
+        addSplat(jx, seamDip, jz, nx, 1, randRange(-0.03, 0.03), 0.066, 0.048, 0.010, 1, 0, 0, r, g, b, 1.0, 0, MAT_OAK, 0.48, rand(), false);
+      }
+    }
+    // Front & right oak table thick bevelled edge + dark apron
+    for (let i = 0; i < 150; i++) {
+      const x = -4.05 + (i + 0.5) / 150 * 8.10;
+      if (x > -3.55 && x < clothRightEdge(2.16) - 0.12) continue; // hidden behind linen drape
+      for (let k = 0; k < 14; k++) {
+        const t = (k + 0.5) / 14;
+        const y = -t * 0.42;
+        const z = 2.18 + 0.025 * Math.sin(Math.min(t * 4, 1) * Math.PI) - (t > 0.35 ? 0.04 : 0);
+        const grain = fbm2(x * 2.0 + 1.3, y * 12.0);
+        const r = 0.095 + 0.075 * grain;
+        const g = 0.052 + 0.040 * grain;
+        const b = 0.030 + 0.022 * grain;
+        addSplat(x + randRange(-0.015, 0.015), y, z, 0, 0.25 * (1 - t), 1, 0.048, 0.032, 0.010, 1, 0, 0, r, g, b, 1.0, 0, MAT_OAK, 0.42, rand(), false);
+      }
+    }
+
+    // 3. WHITE LINEN TABLECLOTH WITH SOFT FOLDS & FRONT DRAPE (~19,500 splats)
+    const clothCols = 152, clothRows = 104;
+    for (let j = 0; j < clothRows; j++) {
+      const z = -2.40 + (j + 0.5) / clothRows * 4.56;
+      const rightX = clothRightEdge(z);
+      for (let i = 0; i < clothCols; i++) {
+        const x = -3.70 + (i + 0.5) / clothCols * (rightX + 3.70);
+        const jx = x + randRange(-0.014, 0.014);
+        const jz = z + randRange(-0.014, 0.014);
+        const y = clothFoldHeight(jx, jz);
+        const [nx, ny, nz] = getTableNormal(jx, jz);
+        // Subtle woven linen thread texture & warm aged cream-white albedo
+        const weave = 0.5 + 0.5 * Math.sin(jx * 52.0) * Math.sin(jz * 52.0);
+        const stain = fbm2(jx * 1.9 + 8.1, jz * 1.9 - 3.4);
+        const baseL = 0.74 + 0.07 * stain + 0.03 * weave;
+        const r = baseL * 1.00;
+        const g = baseL * 0.955;
+        const b = baseL * 0.895;
+        // Translucency weight stored in specRough for MAT_LINEN: higher on raised folds!
+        const foldThinness = clamp((y - 0.025) * 7.5, 0.08, 1.0);
+        const casts = y > 0.052; // raised cloth ridges cast genuine soft raking shadows!
+        addSplat(jx, y, jz, nx, ny, nz, 0.044, 0.040, 0.008, 1, 0, 0, r, g, b, 1.0, 0, MAT_LINEN, foldThinness, rand(), casts);
+      }
+    }
+    // Front overhanging linen drape (z > 2.16 down to y ~ -0.95)
+    for (let i = 0; i < 145; i++) {
+      const rightX = clothRightEdge(2.16);
+      const x = -3.70 + (i + 0.5) / 145 * (rightX + 3.70);
+      for (let k = 0; k < 24; k++) {
+        const v = (k + 0.5) / 24;
+        const jx = x + randRange(-0.012, 0.012);
+        const pleatWave = Math.sin(jx * 6.8 + 0.5) * 0.055 + Math.sin(jx * 13.2 - 1.1) * 0.026;
+        const pleatDeriv = Math.cos(jx * 6.8 + 0.5) * 6.8 * 0.055 + Math.cos(jx * 13.2 - 1.1) * 13.2 * 0.026;
+        const y = clothFoldHeight(jx, 2.16) - 0.03 - v * 0.92;
+        const z = 2.17 + 0.05 * (1 - Math.exp(-v * 6.0)) + pleatWave * smoothstep(0.0, 0.25, v);
+        const nx = -pleatDeriv * smoothstep(0.0, 0.25, v);
+        const ny = 0.25 * Math.exp(-v * 4.0);
+        const nz = 1.0;
+        const weave = fbm2(jx * 4.5, y * 4.5);
+        const baseL = 0.72 + 0.08 * weave;
+        addSplat(jx, y, z, nx, ny, nz, 0.042, 0.038, 0.009, 1, 0, 0, baseL, baseL * 0.95, baseL * 0.89, 1.0, 0, MAT_LINEN, 0.65, rand(), false);
+      }
+    }
+
+    // 4. THREE CANDLES IN TURNED BRASS HOLDERS + WAX PILLARS + SOLIDIFIED DRIPS
+    for (let cIdx = 0; cIdx < 3; cIdx++) {
+      const c = candles[cIdx];
+      const objId = cIdx + 1; // 1, 2, 3 -> dynamically translated by candle offsets!
+
+      // 4a. Brass Candlestick Holder (local coords around (0, 0, 0))
+      const hSteps = 34;
+      for (let j = 0; j < hSteps; j++) {
+        const t = (j + 0.5) / hSteps;
+        const y = t * c.holderH;
+        // Turned baroque brass profile: wide saucer foot, baluster stem, drip cup at top
+        let rad, drdy;
+        if (cIdx === 2) {
+          // Short wide chamberstick saucer + central socket
+          if (t < 0.32) {
+            const u = t / 0.32;
+            rad = c.baseR * (1.0 - 0.18 * Math.sin(u * Math.PI)) - u * 0.04;
+            drdy = -0.15;
+          } else {
+            const u = (t - 0.32) / 0.68;
+            rad = c.waxR * 1.22 + 0.022 * Math.sin(u * Math.PI * 2.0) + (u > 0.82 ? 0.028 * ((u - 0.82) / 0.18) : 0);
+            drdy = 0.12 * Math.cos(u * Math.PI * 2.0);
+          }
+        } else {
+          // Classic tall/medium turned candlestick
+          const foot = Math.exp(-t * 9.5) * (c.baseR - 0.055);
+          const knop1 = 0.048 * Math.exp(-Math.pow((t - 0.48) / 0.13, 2));
+          const knop2 = 0.032 * Math.exp(-Math.pow((t - 0.76) / 0.08, 2));
+          const cup = smoothstep(0.84, 1.0, t) * (c.waxR * 1.38 - 0.052);
+          rad = 0.052 + foot + knop1 + knop2 + cup;
+          drdy = (-9.5 * foot + knop1 * (-2 * (t - 0.48) / 0.0169)) / c.holderH;
+        }
+        const segs = Math.max(20, Math.round(rad * 155));
+        for (let i = 0; i < segs; i++) {
+          const ang = (i + (j & 1) * 0.5) / segs * Math.PI * 2;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const patina = fbm2(ca * 3.0 + cIdx * 5.0, y * 14.0 + sa * 3.0);
+          const r = 0.64 + 0.18 * patina;
+          const g = 0.44 + 0.14 * patina;
+          const b = 0.15 + 0.06 * patina;
+          addSplat(
+            ca * rad, y, sa * rad,
+            ca, -drdy * 0.35, sa,
+            (Math.PI * rad / segs) * 1.45, (c.holderH / hSteps) * 1.45, 0.008,
+            -sa, 0, ca,
+            r, g, b, 1.0, objId, MAT_BRASS, 0.78, rand(), true
+          );
+        }
+      }
+      // Saucer top face on brass foot & drip bobeche
+      const saucerRings = 7;
+      for (let ri = 1; ri <= saucerRings; ri++) {
+        const rr = (ri / saucerRings) * c.baseR * 0.96;
+        const segs = Math.max(12, Math.round(rr * 130));
+        const yS = 0.028 + 0.016 * Math.cos((ri / saucerRings) * Math.PI);
+        for (let i = 0; i < segs; i++) {
+          const ang = (i / segs) * Math.PI * 2;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const patina = fbm2(ca * 4 + cIdx, sa * 4);
+          addSplat(ca * rr, yS, sa * rr, ca * 0.15, 1, sa * 0.15, 0.026, 0.024, 0.006, -sa, 0, ca,
+            0.62 + 0.16 * patina, 0.42 + 0.12 * patina, 0.14 + 0.05 * patina, 1.0, objId, MAT_BRASS, 0.82, rand(), true);
+        }
+      }
+
+      // 4b. Candle Wax Cylinder + Melted Concave Crater + Wax Drips + Wick
+      const waxSteps = Math.round(c.waxH * 46);
+      for (let j = 0; j < waxSteps; j++) {
+        const t = (j + 0.5) / waxSteps;
+        const y = c.holderH + t * c.waxH;
+        // Slight organic taper & uneven rim lip at top
+        const segs = 26;
+        for (let i = 0; i < segs; i++) {
+          const ang = (i + (j & 1) * 0.5) / segs * Math.PI * 2;
+          const rimWave = 0.018 * Math.sin(ang * 3 + cIdx * 2.1) + 0.010 * Math.cos(ang * 5 - cIdx);
+          if (y > c.holderH + c.waxH + rimWave) continue;
+          const rad = c.waxR * (1.0 - 0.04 * t) + 0.004 * Math.sin(y * 18.0 + ang * 2.0);
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const tone = 0.92 + 0.08 * fbm2(ca * 2.5 + cIdx * 3, y * 8.0);
+          // specRough stores normalized proximity to candle top [0..1] for warm wax subsurface glow!
+          const topProx = smoothstep(0.35, 1.0, t);
+          addSplat(
+            ca * rad, y, sa * rad,
+            ca, 0.06, sa,
+            0.024, 0.022, 0.008,
+            -sa, 0, ca,
+            0.88 * tone, 0.81 * tone, 0.69 * tone, 1.0, objId, MAT_WAX, topProx, rand(), true
+          );
+        }
+      }
+      // Concave wax pool at top of candle
+      for (let ri = 0; ri < 5; ri++) {
+        const rr = (ri + 0.4) / 5 * c.waxR * 0.92;
+        const segs = Math.max(8, ri * 6);
+        for (let i = 0; i < segs; i++) {
+          const ang = (i / segs) * Math.PI * 2;
+          const yCup = c.holderH + c.waxH - 0.022 * (1 - (rr / c.waxR) * (rr / c.waxR));
+          addSplat(
+            Math.cos(ang) * rr, yCup, Math.sin(ang) * rr,
+            -Math.cos(ang) * 0.25, 1.0, -Math.sin(ang) * 0.25,
+            0.022, 0.022, 0.007, 1, 0, 0,
+            0.94, 0.87, 0.74, 1.0, objId, MAT_WAX, 1.0, rand(), true
+          );
+        }
+      }
+      // Organic solidified wax drips running down the side of each candle
+      const numDrips = 5 + cIdx;
+      for (let d = 0; d < numDrips; d++) {
+        const baseAng = (d / numDrips) * Math.PI * 2 + randRange(-0.28, 0.28);
+        const dripLen = c.waxH * randRange(0.32, 0.86);
+        const stepsD = Math.round(dripLen * 55);
+        for (let s = 0; s <= stepsD; s++) {
+          const u = s / stepsD;
+          const ang = baseAng + 0.08 * Math.sin(u * 9.0 + d);
+          const y = c.holderH + c.waxH - u * dripLen;
+          const bead = (s === stepsD) ? 1.55 : (1.0 - 0.35 * u);
+          const rDrip = c.waxR + 0.011 * bead;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const topProx = smoothstep(c.holderH + c.waxH * 0.35, c.holderH + c.waxH, y);
+          addSplat(
+            ca * rDrip, y, sa * rDrip,
+            ca, (s === stepsD ? -0.35 : 0.08), sa,
+            0.016 * bead, 0.018 * bead, 0.009,
+            -sa, 0, ca,
+            0.93, 0.86, 0.74, 1.0, objId, MAT_WAX, topProx, rand(), true
+          );
+        }
+      }
+      // Charred braided wick rising from wax pool
+      for (let w = 0; w < 8; w++) {
+        const u = w / 7;
+        const yW = c.holderH + c.waxH - 0.015 + u * 0.068;
+        const bend = u * u * 0.012;
+        addSplat(bend, yW, 0, 1, 0.2, 0, 0.008, 0.011, 0.006, 0, 1, 0,
+          0.12 + 0.15 * (1 - u), 0.09 + 0.12 * (1 - u), 0.07, 1.0, objId, MAT_WAX, u, rand(), false);
+      }
+    }
+
+    // 5. RUSTIC CARAVAGGIO BREAD LOAF (front-left on linen cloth)
+    {
+      const bx = BREAD.x, bz = BREAD.z, by = clothFoldHeight(bx, bz);
+      const rx = 0.44, ry = 0.26, rz = 0.33;
+      const rot = 0.42; // angled naturally
+      const cr = Math.cos(rot), sr = Math.sin(rot);
+      for (let i = 0; i < 2500; i++) {
+        // Fibonacci / jittered hemisphere-ellipsoid with flat bottom
+        const u = rand(), v = rand();
+        const theta = u * Math.PI * 2;
+        const phi = Math.acos(1 - 1.32 * v); // goes slightly below equator for rounded loaf tuck
+        const sp = Math.sin(phi), cp = Math.cos(phi);
+        let lx = sp * Math.cos(theta) * rx;
+        let ly = Math.max(-0.06, cp * ry + 0.05);
+        let lz = sp * Math.sin(theta) * rz;
+
+        // Diagonal baker's score slashes across top crust
+        const slashCoord = (lx * 0.85 + lz * 0.52) * 7.5;
+        const slashDist = Math.abs(slashCoord - Math.round(slashCoord));
+        const inSlash = (ly > 0.14 && Math.abs(lx) < 0.30 && slashDist < 0.13);
+        if (inSlash) ly -= 0.022 * (1 - slashDist / 0.13);
+
+        const bump = 0.016 * fbm2(lx * 9.0 + 2.1, lz * 9.0 - 1.4);
+        lx += (lx / rx) * bump; ly += bump; lz += (lz / rz) * bump;
+
+        const wx = bx + lx * cr - lz * sr;
+        const wz = bz + lx * sr + lz * cr;
+        const wy = by + ly + 0.04;
+
+        let nxL = lx / (rx * rx), nyL = (ly - 0.04) / (ry * ry), nzL = lz / (rz * rz);
+        const nx = nxL * cr - nzL * sr, nz = nxL * sr + nzL * cr;
+
+        const bake = fbm2(wx * 5.5, wz * 5.5 + wy * 4.0);
+        const flour = smoothstep(0.62, 0.88, fbm2(wx * 11.0 + 4.2, wz * 11.0));
+        let r, g, b;
+        if (inSlash) {
+          // Pale golden baked crumb inside score cut
+          r = 0.72 + 0.10 * bake; g = 0.56 + 0.09 * bake; b = 0.34 + 0.06 * bake;
+        } else {
+          // Rich crusty golden-umber loaf with subtle flour dusting
+          r = 0.42 + 0.22 * bake + 0.22 * flour;
+          g = 0.24 + 0.15 * bake + 0.20 * flour;
+          b = 0.11 + 0.08 * bake + 0.17 * flour;
+        }
+        addSplat(wx, wy, wz, nx, nyL, nz, 0.032, 0.026, 0.009, cr, 0, sr, r, g, b, 1.0, 0, MAT_BREAD, 0.18, rand(), true);
+      }
+    }
+
+    // 6. CLUSTER OF DARK WINE GRAPES + WOODY STEM (front-centre near glasses)
+    {
+      const gx0 = GRAPES.x, gz0 = GRAPES.z, gy0 = clothFoldHeight(gx0, gz0);
+      const grapeCenters = [
+        [0.00, 0.055, 0.00, 0.056], [-0.09, 0.052, 0.04, 0.054], [0.09, 0.050, 0.05, 0.052],
+        [-0.04, 0.052, -0.09, 0.053], [0.06, 0.052, -0.08, 0.054], [-0.16, 0.048, -0.03, 0.050],
+        [0.16, 0.048, -0.02, 0.049], [-0.03, 0.125, 0.01, 0.053], [0.05, 0.120, -0.02, 0.051],
+        [-0.09, 0.112, -0.05, 0.048], [0.01, 0.048, 0.11, 0.050], [-0.12, 0.046, 0.12, 0.047],
+        [0.12, 0.105, 0.03, 0.047], [-0.01, 0.175, -0.02, 0.046],
+        // Two loose grapes resting slightly apart on the white linen
+        [0.36, 0.048, 0.09, 0.051], [0.46, 0.045, 0.01, 0.047]
+      ];
+      for (let gi = 0; gi < grapeCenters.length; gi++) {
+        const [ox, oy, oz, gr] = grapeCenters[gi];
+        const cx = gx0 + ox, cz = gz0 + oz;
+        const cy = clothFoldHeight(cx, cz) + oy;
+        const bloomTint = randRange(0.0, 1.0);
+        const pts = 115;
+        for (let k = 0; k < pts; k++) {
+          const z = 1 - (2 * (k + 0.5)) / pts;
+          const rxy = Math.sqrt(Math.max(0, 1 - z * z));
+          const ang = k * 2.39996323;
+          const nx = rxy * Math.cos(ang), ny = z, nz = rxy * Math.sin(ang);
+          const px = cx + nx * gr * 1.08;
+          const py = cy + ny * gr * 0.96;
+          const pz = cz + nz * gr * 1.04;
+          // Deep garnet-plum skin with powdery waxy pruina bloom
+          const pruina = 0.35 * bloomTint * smoothstep(-0.2, 0.8, ny + 0.3 * fbm2(px * 18, pz * 18));
+          const r = 0.16 + 0.08 * rand() + 0.10 * pruina;
+          const g = 0.035 + 0.02 * rand() + 0.09 * pruina;
+          const b = 0.09 + 0.05 * rand() + 0.14 * pruina;
+          addSplat(px, py, pz, nx, ny, nz, 0.019, 0.017, 0.007, -nz, 0, nx, r, g, b, 1.0, 0, MAT_GRAPE, 0.68, rand(), true);
+        }
+      }
+      // Woody vine stem curling out of top of grape cluster
+      for (let s = 0; s < 42; s++) {
+        const u = s / 41;
+        const sx = gx0 - 0.02 - u * 0.18 + 0.03 * Math.sin(u * 8.0);
+        const sy = gy0 + 0.19 + u * 0.11 - u * u * 0.06;
+        const sz = gz0 - 0.03 - u * 0.11 + 0.025 * Math.cos(u * 7.0);
+        addSplat(sx, sy, sz, 0, 1, 0.3, 0.014, 0.009, 0.006, 1, 0, 0, 0.22, 0.18, 0.08, 1.0, 0, MAT_OAK, 0.25, rand(), true);
+      }
+    }
+
+    // 7. CRUMPLED LINEN NAPKIN (front-right, straddling cloth edge & dark oak)
+    {
+      const nx0 = NAPKIN.x, nz0 = NAPKIN.z;
+      const grid = 46;
+      for (let j = 0; j < grid; j++) {
+        for (let i = 0; i < grid; i++) {
+          const u = (i + randRange(0.15, 0.85)) / grid - 0.5;
+          const v = (j + randRange(0.15, 0.85)) / grid - 0.5;
+          // Irregular gathered diamond-square napkin outline
+          const ang = 0.55;
+          const rx = (u * Math.cos(ang) - v * Math.sin(ang)) * 0.72;
+          const rz = (u * Math.sin(ang) + v * Math.cos(ang)) * 0.56;
+          // Pinch / crumple displacement toward centre
+          const rDist = Math.hypot(u, v);
+          if (rDist > 0.50 + 0.06 * Math.sin(Math.atan2(v, u) * 5.0)) continue;
+          const crumple = 0.095 * Math.pow(Math.max(0, 1 - rDist * 1.85), 1.4) * (0.55 + 0.45 * Math.sin(u * 13.0 + v * 8.0))
+                        + 0.032 * Math.sin(u * 18.0 - v * 12.0) * (1 - rDist);
+          const wx = nx0 + rx * (0.82 + 0.18 * rDist);
+          const wz = nz0 + rz * (0.82 + 0.18 * rDist);
+          const wy = getTableSurfaceY(wx, wz) + 0.014 + Math.max(0, crumple);
+          // Finite diff normal of crumpled cloth
+          const dcu = 0.42 * Math.cos(u * 18.0 - v * 12.0);
+          const dcv = -0.30 * Math.cos(u * 18.0 - v * 12.0);
+          const weave = fbm2(wx * 8.0, wz * 8.0);
+          const base = 0.74 + 0.07 * weave;
+          addSplat(wx, wy, wz, -dcu, 1.0, -dcv, 0.019, 0.018, 0.006, 1, 0, 0, base, base * 0.94, base * 0.86, 1.0, 0, MAT_LINEN, 0.85, rand(), true);
+        }
+      }
+    }
+
+    // 8. DYNAMIC EMISSIVE FLAME SPLATS (objId = 4, 5, 6 for candles 0, 1, 2)
+    // Deformed in vertex shader by curl noise, flicker, velocity lean & draught!
+    for (let cIdx = 0; cIdx < 3; cIdx++) {
+      const objId = 4 + cIdx;
+      const flameSplats = 92;
+      for (let k = 0; k < flameSplats; k++) {
+        // Normalized height along flame [0..1] stored in py; radial offset in px, pz
+        const hNorm = Math.pow((k + 0.5) / flameSplats, 0.88);
+        const profileR = Math.sin(Math.pow(hNorm, 0.68) * Math.PI) * 0.044;
+        const radFrac = Math.sqrt(rand()) * (hNorm > 0.85 ? 0.5 : 1.0);
+        const ang = rand() * Math.PI * 2;
+        const lx = Math.cos(ang) * profileR * radFrac;
+        const lz = Math.sin(ang) * profileR * radFrac;
+        const ly = hNorm * 0.215; // base flame height ~0.215 units
+
+        // Flame zone colour: faint blue cup at base, incandescent white-gold core, orange outer body
+        let r, g, b, op, sRad, sVert;
+        if (hNorm < 0.17 && radFrac > 0.45) {
+          // Faint blue flame base
+          r = 0.22; g = 0.48; b = 1.15;
+          op = 0.55; sRad = 0.017; sVert = 0.020;
+        } else if (radFrac < 0.48 && hNorm > 0.10 && hNorm < 0.74) {
+          // White-yellow incandescent core (allowed to reach blown warm white + bloom!)
+          r = 4.2; g = 3.5; b = 2.1;
+          op = 0.92; sRad = 0.019; sVert = 0.032;
+        } else {
+          // Rich orange flame body
+          const tipCool = smoothstep(0.6, 1.0, hNorm);
+          r = 2.4 - 0.5 * tipCool;
+          g = 0.98 - 0.42 * tipCool;
+          b = 0.16;
+          op = 0.78 * (1.0 - 0.35 * tipCool);
+          sRad = 0.021 * (1.0 - 0.3 * tipCool);
+          sVert = 0.034;
+        }
+        addSplat(lx, ly, lz, 0, 0, 1, sRad, sVert, 0.012, 1, 0, 0, r, g, b, op, objId, MAT_FLAME, hNorm, rand(), false);
+      }
+    }
+
+    // 9. RISING CURLING SMOKE WISPS (objId = 7, 8, 9 continuous wisps + 10, 11, 12 blow-out puffs)
+    for (let cIdx = 0; cIdx < 3; cIdx++) {
+      // Continuous subtle rising smoke wisps
+      for (let k = 0; k < 85; k++) {
+        const phase = k / 85;
+        const jitterX = randRange(-0.012, 0.012);
+        const jitterZ = randRange(-0.012, 0.012);
+        addSplat(jitterX, phase, jitterZ, 0, 0, 1, 0.022, 0.030, 0.015, 1, 0, 0,
+          0.52, 0.50, 0.56, 0.16, 7 + cIdx, MAT_SMOKE, phase, rand(), false);
+      }
+      // Blow-out smoke puff splats (activated when candle is blown out!)
+      for (let k = 0; k < 50; k++) {
+        const vx = randRange(-1, 1), vy = randRange(0.4, 1.5), vz = randRange(-1, 1);
+        addSplat(vx * 0.18, vy * 0.38, vz * 0.18, 0, 0, 1, 0.030, 0.030, 0.020, 1, 0, 0,
+          0.62, 0.58, 0.64, 0.42, 10 + cIdx, MAT_SMOKE, rand(), rand(), false);
+      }
+    }
+
+    // 10. DRIFTING DUST MOTES IN CANDLELIGHT (objId = 13) - subtle motes near the warm air of the table
+    for (let k = 0; k < 44; k++) {
+      const dx = randRange(-2.3, 1.9);
+      const dy = randRange(0.22, 1.75);
+      const dz = randRange(-1.6, 1.15);
+      addSplat(dx, dy, dz, 0, 0, 1, 0.006, 0.006, 0.005, 1, 0, 0,
+        0.92, 0.80, 0.62, 0.34, 13, MAT_DUST, rand(), rand(), false);
+    }
+  }
+
+  buildSceneSplats();
+
+  // =========================================================================
+  // 5. WEB WORKER BACK-TO-FRONT RADIX SORT OF SPLATS
+  // =========================================================================
+  const workerSource = `
+    let meta = null;
+    let count = 0;
+    let keysA = null, keysB = null, valsB = null;
+    const hist0 = new Uint32Array(256);
+    const hist1 = new Uint32Array(256);
+
+    self.onmessage = (e) => {
+      const msg = e.data;
+      if (msg.type === 'init') {
+        meta = msg.meta;
+        count = msg.count;
+        keysA = new Uint16Array(count);
+        keysB = new Uint16Array(count);
+        valsB = new Uint32Array(count);
+        return;
+      }
+      if (msg.type === 'sort') {
+        const out = msg.indices;
+        const vr = msg.viewRowZ; // [rx, ry, rz, rw] where z_cam = rx*x + ry*y + rz*z + rw (<0 in front)
+        const cPos = msg.candlePos; // 9 floats: [x0,y0,z0, x1,y1,z1, x2,y2,z2]
+        const wPos = msg.wickPos;   // 9 floats: [wx0,wy0,wz0, ...]
+        const pPos = msg.puffPos;   // 12 floats: [px,py,pz,age, ...]
+        const time = msg.time;
+
+        hist0.fill(0);
+        hist1.fill(0);
+
+        const rx = vr[0], ry = vr[1], rz = vr[2], rw = vr[3];
+        const invRange = 65535.0 / 12.0;
+
+        for (let i = 0; i < count; i++) {
+          const b = i * 4;
+          let x = meta[b], y = meta[b + 1], z = meta[b + 2];
+          const code = meta[b + 3];
+          const objId = code | 0;
+          const seed = (code - objId) * 1000.0;
+
+          if (objId >= 1 && objId <= 3) {
+            const ci = (objId - 1) * 3;
+            x += cPos[ci]; y += cPos[ci + 1]; z += cPos[ci + 2];
+          } else if (objId >= 4 && objId <= 6) {
+            const ci = (objId - 4) * 3;
+            x += wPos[ci]; y += wPos[ci + 1]; z += wPos[ci + 2];
+          } else if (objId >= 7 && objId <= 9) {
+            const ci = (objId - 7) * 3;
+            const h = (y + time * 0.22 + seed * 0.37) % 1.0;
+            x += wPos[ci] + Math.sin(h * 6.0 + time * 1.3 + seed * 6.2) * 0.08 * h;
+            y = wPos[ci + 1] + 0.18 + h * 1.25;
+            z += wPos[ci + 2] + Math.cos(h * 5.2 - time * 1.1 + seed * 6.2) * 0.08 * h;
+          } else if (objId >= 10 && objId <= 12) {
+            const pi = (objId - 10) * 4;
+            const age = pPos[pi + 3];
+            x = pPos[pi] + x * (0.3 + age * 1.5);
+            y = pPos[pi + 1] + y * (0.2 + age * 2.2) + age * 0.55;
+            z = pPos[pi + 2] + z * (0.3 + age * 1.5);
+          } else if (objId === 13) {
+            x += Math.sin(time * 0.27 + seed * 12.0) * 0.18;
+            y += Math.cos(time * 0.19 + seed * 9.0) * 0.12;
+            z += Math.sin(time * 0.23 + seed * 7.0) * 0.18;
+          }
+
+          // dist = -z_cam (larger dist = further away -> smaller key so back sorts first!)
+          const dist = -(rx * x + ry * y + rz * z + rw);
+          let k = ((11.5 - dist) * invRange) | 0;
+          if (k < 0) k = 0; else if (k > 65535) k = 65535;
+          keysA[i] = k;
+          out[i] = i;
+          hist0[k & 255]++;
+          hist1[k >>> 8]++;
+        }
+
+        let sum0 = 0, sum1 = 0;
+        for (let b = 0; b < 256; b++) {
+          const c0 = hist0[b]; hist0[b] = sum0; sum0 += c0;
+          const c1 = hist1[b]; hist1[b] = sum1; sum1 += c1;
+        }
+
+        for (let i = 0; i < count; i++) {
+          const k = keysA[i];
+          const dst = hist0[k & 255]++;
+          keysB[dst] = k;
+          valsB[dst] = out[i];
+        }
+        for (let i = 0; i < count; i++) {
+          const k = keysB[i];
+          const dst = hist1[k >>> 8]++;
+          out[dst] = valsB[i];
+        }
+
+        self.postMessage({ indices: out }, [out.buffer]);
+      }
+    };
+  `;
+
+  const sortWorker = new Worker(URL.createObjectURL(new Blob([workerSource], { type: 'application/javascript' })));
+  sortWorker.postMessage({ type: 'init', meta: sortMetaData.subarray(0, splatCount * 4), count: splatCount });
+
+  let sortedIndicesGPU = new Uint32Array(splatCount);
+  let workerTransferBuf = new Uint32Array(splatCount);
+  let workerBusy = false;
+  let sortUpdated = false;
+  for (let i = 0; i < splatCount; i++) sortedIndicesGPU[i] = i;
+
+  sortWorker.onmessage = (e) => {
+    const finished = e.data.indices;
+    // Swap finished sorted buffer into GPU upload slot, recycle previous buffer
+    const prev = sortedIndicesGPU;
+    sortedIndicesGPU = finished;
+    workerTransferBuf = prev;
+    sortUpdated = true;
+    workerBusy = false;
+  };
+
+  // =========================================================================
+  // 6. WEBGL2 CONTEXT & SHARED GLSL ANALYTIC GLASS / WINE / CLOTH LIBRARY
+  // =========================================================================
+  const canvas = document.getElementById('glcanvas');
+  const gl = canvas.getContext('webgl2', {
+    alpha: false,
+    depth: false,
+    stencil: false,
+    antialias: false,
+    premultipliedAlpha: false,
+    powerPreference: 'high-performance'
+  });
+  if (!gl) throw new Error('WebGL2 is required');
+
+  gl.getExtension('EXT_color_buffer_float');
+  gl.getExtension('EXT_float_blend');
+
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(sh);
+      console.error('Shader compile error:\n', info, '\n', src);
+      throw new Error(info);
+    }
+    return sh;
+  }
+
+  function createProgram(vsSrc, fsSrc) {
+    const prog = gl.createProgram();
+    const vs = compileShader(gl.VERTEX_SHADER, vsSrc);
+    const fs = compileShader(gl.FRAGMENT_SHADER, fsSrc);
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      const info = gl.getProgramInfoLog(prog);
+      console.error('Program link error:\n', info);
+      throw new Error(info);
+    }
+    return prog;
+  }
+
+  const QUAD_VS = `#version 300 es
+  precision highp float;
+  const vec2 POS[3] = vec2[3](vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
+  out vec2 vUV;
+  void main() {
+    vec2 p = POS[gl_VertexID];
+    vUV = p * 0.5 + 0.5;
+    gl_Position = vec4(p, 0.0, 1.0);
+  }`;
+
+  // Shared GLSL library: exact cloth heightfield, analytic lathe + faceted glassware,
+  // curved wine meniscus, Beer-Lambert garnet-to-ruby absorption, and Glass 2 wine film & legs
+  const COMMON_SCENE_GLSL = `
+  const float PI = 3.14159265359;
+  const vec3 WINE_SIGMA = vec3(2.35, 16.8, 20.2); // Garnet where thick, glowing ruby at thin rim & meniscus
+
+  uniform vec4 uVessels[3];    // (x, yBase, z, height) for 0=Decanter, 1=Glass1, 2=Glass2
+  uniform vec3 uWineLevels;    // local y wine height in (Decanter, Glass1, Glass2)
+  uniform vec2 uWineSlosh;     // subtle pour/slosh tilt on meniscus
+  uniform float uTime;
+
+  float clothRightEdgeG(float z) {
+    return 2.18 + 0.10 * sin(z * 1.55 + 0.4) + 0.04 * sin(z * 3.7);
+  }
+  bool isOnClothG(vec2 xz) {
+    return xz.x >= -3.72 && xz.x <= clothRightEdgeG(xz.y) && xz.y >= -2.42;
+  }
+  float clothFoldHeightG(vec2 xz) {
+    if (!isOnClothG(xz)) return 0.0;
+    float rEdge = clothRightEdgeG(xz.y);
+    float edgeFade = smoothstep(-3.72, -3.45, xz.x) * smoothstep(rEdge, rEdge - 0.18, xz.x) * smoothstep(-2.42, -2.15, xz.y);
+    float dFold1 = (xz.x + 1.45) * 0.78 - (xz.y + 0.15) * 0.62;
+    float fold1 = 0.115 * exp(-dFold1 * dFold1 * 6.5) * smoothstep(1.35, -0.9, xz.y);
+    float dFold2 = (xz.x - 1.18) * 0.80 + (xz.y + 0.22) * 0.60;
+    float fold2 = 0.105 * exp(-dFold2 * dFold2 * 7.0) * smoothstep(1.25, -1.0, xz.y);
+    float dFold3 = (xz.x + 0.22) * 0.55 + (xz.y - 1.18) * 0.83;
+    float fold3 = 0.055 * exp(-dFold3 * dFold3 * 9.0);
+    float ripples = 0.014 * sin(xz.x * 3.1 + xz.y * 1.9) + 0.009 * cos(xz.x * 5.3 - xz.y * 3.4);
+
+    float d0 = length(xz - uVessels[0].xz);
+    float d1 = length(xz - uVessels[1].xz);
+    float d2 = length(xz - uVessels[2].xz);
+    float pad = smoothstep(0.36, 0.72, d0) * smoothstep(0.24, 0.48, d1) * smoothstep(0.22, 0.45, d2);
+    return 0.018 + edgeFade * pad * max(0.0, fold1 + fold2 + fold3 + ripples + 0.016);
+  }
+
+  // Regular N-gon polygonal crystal facet factor
+  float polyFacet(float phi, float nSides, float phase) {
+    float sector = 2.0 * PI / nSides;
+    float a = mod(phi + phase + 4.0 * PI, sector) - 0.5 * sector;
+    // Slight concave flute inside each facet for crisp facet-edge ridges!
+    float flatPoly = cos(PI / nSides) / max(cos(a), 0.70);
+    float flute = -0.010 * cos(a * nSides);
+    return flatPoly + flute;
+  }
+
+  // Analytic outer & inner profiles for the 3 glass vessels
+  // Returns vec3(rOut, rIn, cavBottomY); if y < cavBottomY, vessel is solid crystal (rIn < 0)
+  vec3 vesselProfile(int v, float y, float phi) {
+    if (v == 0) {
+      // Cut-Glass Decanter (H = 1.54)
+      float yc = clamp(y, 0.0, 1.54);
+      // Base + broad bulbous carafe belly + slender neck + neck ring + flared pouring lip
+      float baseFoot = 0.34 * exp(-pow(max(yc - 0.03, 0.0) / 0.065, 2.0));
+      float belly = 0.535 * sin(clamp((yc + 0.04) / 0.96, 0.0, 1.0) * PI);
+      float neck = 0.142 + 0.072 * smoothstep(1.30, 1.54, yc) * smoothstep(1.30, 1.54, yc);
+      float collar = 0.028 * exp(-pow((yc - 1.12) / 0.036, 2.0));
+      float bodyBlend = smoothstep(0.98, 0.76, yc);
+      float rLathe = max(baseFoot, mix(neck, max(belly, 0.155), bodyBlend)) + collar;
+
+      // Cut-crystal facets: 10 vertical flutes on belly + 10 staggered shoulder facets + faceted collar
+      float bellyCutMask = smoothstep(0.09, 0.16, yc) * smoothstep(0.68, 0.58, yc);
+      float shldrCutMask = smoothstep(0.58, 0.66, yc) * smoothstep(0.92, 0.84, yc);
+      float collarCutMask = smoothstep(1.07, 1.10, yc) * smoothstep(1.17, 1.14, yc);
+
+      float fBelly = polyFacet(phi, 10.0, 0.0);
+      float fShldr = polyFacet(phi, 10.0, PI / 10.0);
+      float facetMult = mix(1.0, fBelly, 0.78 * bellyCutMask);
+      facetMult = mix(facetMult, fShldr, 0.82 * shldrCutMask);
+      facetMult = mix(facetMult, fBelly, 0.70 * collarCutMask);
+
+      float rOut = rLathe * facetMult;
+      float rIn = rLathe - mix(0.034, 0.052, bodyBlend);
+      return vec3(rOut, rIn, 0.115);
+    } else if (v == 1) {
+      // Wine Glass 1: Half-Full Stemmed Goblet (H = 1.08)
+      float yc = clamp(y, 0.0, 1.08);
+      if (yc < 0.445) {
+        float foot = 0.255 * exp(-pow(max(yc - 0.010, 0.0) / 0.026, 1.6));
+        float knop = 0.024 * exp(-pow((yc - 0.255) / 0.036, 2.0));
+        float flareTop = 0.035 * smoothstep(0.37, 0.445, yc);
+        float rStem = max(foot, 0.033 + knop + flareTop);
+        return vec3(rStem, -1.0, 0.458);
+      } else {
+        float t = (yc - 0.445) / (1.08 - 0.445); // 0..1 along tulip bowl
+        float rBowl = 0.068 + 0.222 * sin(pow(t, 0.66) * 2.32);
+        return vec3(rBowl, rBowl - 0.017, 0.458);
+      }
+    } else {
+      // Wine Glass 2: Almost-Empty Stemmed Goblet with Film & Legs (H = 0.98)
+      float yc = clamp(y, 0.0, 0.98);
+      if (yc < 0.405) {
+        float foot = 0.238 * exp(-pow(max(yc - 0.010, 0.0) / 0.025, 1.6));
+        float knop = 0.022 * exp(-pow((yc - 0.23) / 0.034, 2.0));
+        float flareTop = 0.032 * smoothstep(0.33, 0.405, yc);
+        float rStem = max(foot, 0.031 + knop + flareTop);
+        return vec3(rStem, -1.0, 0.418);
+      } else {
+        float t = (yc - 0.405) / (0.98 - 0.405);
+        float rBowl = 0.064 + 0.206 * sin(pow(t, 0.66) * 2.32);
+        return vec3(rBowl, rBowl - 0.016, 0.418);
+      }
+    }
+  }
+
+  // Signed distance to solid glass material of vessel v (negative inside glass wall/stem/base)
+  float sdVesselGlass(int v, vec3 pLocal) {
+    float H = uVessels[v].w;
+    float rho = length(pLocal.xz);
+    float phi = atan(pLocal.z, pLocal.x);
+    vec3 prof = vesselProfile(v, pLocal.y, phi);
+    float rOut = prof.x;
+    float rIn  = prof.y;
+    float cavBot = prof.z;
+
+    // Lipschitz slope correction
+    vec3 profUp = vesselProfile(v, min(pLocal.y + 0.012, H), phi);
+    float slopeCorr = inversesqrt(1.0 + pow((profUp.x - rOut) / 0.012, 2.0));
+
+    if (pLocal.y < cavBot) {
+      // Solid crystal base / foot / stem
+      float dRad = (rho - rOut) * slopeCorr;
+      float dBot = -pLocal.y;
+      float dCavFloor = pLocal.y - cavBot;
+      if (rIn > 0.0 && rho < rIn) {
+        return max(dRad, max(dBot, dCavFloor));
+      }
+      return max(dRad, dBot);
+    } else {
+      // Hollow glass wall with rounded crystal rim at y = H
+      float rMid = 0.5 * (rOut + rIn);
+      float halfW = max(0.008, 0.5 * (rOut - rIn));
+      float dMid = (rho - rMid) * slopeCorr;
+      if (pLocal.y > H) {
+        return length(vec2(dMid, pLocal.y - H)) - halfW;
+      }
+      // Smooth join with solid floor at cavBot
+      float dShell = abs(dMid) - halfW;
+      if (rho < rMid && pLocal.y < cavBot + halfW) {
+        float dFloor = (cavBot - pLocal.y);
+        dShell = min(dShell, max((rho - rOut) * slopeCorr, -dFloor - halfW));
+      }
+      return dShell;
+    }
+  }
+
+  // Curved wine meniscus height inside vessel v
+  float wineSurfaceY(int v, vec3 pLocal, float rIn) {
+    float baseLvl = (v == 0) ? uWineLevels.x : ((v == 1) ? uWineLevels.y : uWineLevels.z);
+    float wallDist = max(rIn - length(pLocal.xz), 0.0);
+    float meniscusRise = ((v == 0) ? 0.028 : 0.023) * exp(-wallDist / 0.032);
+    float slosh = (v <= 1) ? dot(pLocal.xz, uWineSlosh) : 0.0;
+    return baseLvl + meniscusRise + slosh;
+  }
+
+  // Signed distance to bulk liquid wine inside vessel v (negative inside wine)
+  float sdVesselWine(int v, vec3 pLocal) {
+    float H = uVessels[v].w;
+    if (pLocal.y < 0.05 || pLocal.y > H - 0.02) return 1.0;
+    float rho = length(pLocal.xz);
+    float phi = atan(pLocal.z, pLocal.x);
+    vec3 prof = vesselProfile(v, pLocal.y, phi);
+    float rIn = prof.y;
+    float cavBot = prof.z;
+    if (rIn <= 0.0) return 1.0;
+    float ySurf = wineSurfaceY(v, pLocal, rIn);
+    float dWall = rho - (rIn + 0.002); // wets right onto inner glass wall
+    float dBot  = cavBot - 0.002 - pLocal.y;
+    float dTop  = (pLocal.y - ySurf) * 0.88;
+    return max(max(dWall, dBot), dTop);
+  }
+
+  // Thin red wine film & Marangoni tears ("legs of wine") on inner wall of Glass 2 (almost empty)
+  // Returns optical wine film thickness [0..0.095]
+  float glass2WineFilm(vec3 pLocal) {
+    float y = pLocal.y;
+    if (y < 0.46 || y > 0.84) return 0.0;
+    float phi = atan(pLocal.z, pLocal.x);
+    float heightMask = smoothstep(0.84, 0.75, y) * smoothstep(0.45, 0.49, y);
+    // Thin continuous ruby-rose film + Marangoni upper arch ring
+    float archY = 0.76 + 0.026 * sin(phi * 3.0 + 1.2) + 0.016 * cos(phi * 5.0);
+    float ringRidge = 0.032 * exp(-pow((y - archY) / 0.020, 2.0));
+    float baseFilm = 0.020 * smoothstep(archY + 0.03, archY - 0.05, y);
+
+    // ~10 distinct vertical tear rivulets ("legs of wine") with slowly descending wine droplets
+    float legWave = cos(phi * 10.0 + 0.45 * sin(phi * 3.0) + 0.25 * cos(phi * 6.0));
+    float legTrack = pow(max(legWave, 0.0), 7.0);
+    float legTopMask = smoothstep(archY + 0.015, archY - 0.02, y) * smoothstep(0.46, 0.50, y);
+
+    // Slowly creeping tear beads along the legs
+    float colSeed = floor((phi + PI) / (2.0 * PI / 10.0));
+    float fallPhase = fract(uTime * 0.045 + fract(sin(colSeed * 91.7) * 437.5));
+    float dropY = mix(archY - 0.01, 0.49, fallPhase);
+    float drop = exp(-pow((y - dropY) / 0.026, 2.0)) * legTrack;
+
+    return max(0.0, (baseFilm + ringRidge + (0.048 * legTrack + 0.055 * drop) * legTopMask) * heightMask);
+  }
+
+  // Ray-cylinder intersection for vessel bounding volume [0, tMax]
+  vec2 intersectCylinder(vec3 ro, vec3 rd, vec3 baseCenter, float rad, float height) {
+    vec3 oc = ro - baseCenter;
+    float a = dot(rd.xz, rd.xz);
+    float b = dot(oc.xz, rd.xz);
+    float c = dot(oc.xz, oc.xz) - rad * rad;
+    float t0 = 0.0, t1 = 1e5;
+    if (a > 1e-7) {
+      float disc = b * b - a * c;
+      if (disc < 0.0) return vec2(1.0, -1.0);
+      float s = sqrt(disc);
+      t0 = (-b - s) / a;
+      t1 = (-b + s) / a;
+    } else if (c > 0.0) {
+      return vec2(1.0, -1.0);
+    }
+    if (abs(rd.y) > 1e-6) {
+      float ty0 = (0.0 - oc.y) / rd.y;
+      float ty1 = (height - oc.y) / rd.y;
+      t0 = max(t0, min(ty0, ty1));
+      t1 = min(t1, max(ty0, ty1));
+    } else if (oc.y < 0.0 || oc.y > height) {
+      return vec2(1.0, -1.0);
+    }
+    return vec2(max(t0, 0.0), t1);
+  }
+  `;
+
+  // =========================================================================
+  // 7. PASS 1 SHADERS: DUAL-PARABOLOID OMNIDIRECTIONAL SHADOW ATLAS
+  //    Atlas layout: 3 candles x 2 hemispheres (-Y, +Y) = 6 tiles in 1536 x 1024
+  //    (3 columns x 2 rows of 512x512 tiles). Stores:
+  //    DEPTH_COMPONENT24 = opaque splat blocker distance,
+  //    RGBA16F = optical shadow transmittance RGB through analytic glass & wine!
+  // =========================================================================
+  const SHADOW_ATLAS_W = SHADOW_SIZE * 3; // 1536
+  const SHADOW_ATLAS_H = SHADOW_SIZE * 2; // 1024
+
+  const SHADOW_SPLAT_VS = `#version 300 es
+  precision highp float;
+  precision highp int;
+
+  layout(location = 0) in vec2 aCorner;
+  layout(location = 1) in uint aSplatIdx;
+
+  uniform sampler2D uSplatTex;
+  uniform vec3 uCandlePos[3];
+  uniform vec3 uLightPos;
+  uniform float uHemiSign; // -1.0 for lower hemisphere, +1.0 for upper hemisphere
+
+  out vec2 vCorner;
+  out float vDist;
+  out float vClipSide;
+
+  vec4 fetchSplat(int idx, int off) {
+    int col = (idx & 255) * 5 + off;
+    int row = idx >> 8;
+    return texelFetch(uSplatTex, ivec2(col, row), 0);
+  }
+
+  void main() {
+    int idx = int(aSplatIdx);
+    vec4 t0 = fetchSplat(idx, 0);
+    vec4 t1 = fetchSplat(idx, 1);
+    vec4 t2 = fetchSplat(idx, 2);
+
+    vec3 worldPos = t0.xyz;
+    int objId = int(t0.w + 0.5);
+    if (objId >= 1 && objId <= 3) {
+      worldPos += uCandlePos[objId - 1];
+    }
+
+    vec3 rel = worldPos - uLightPos;
+    float dist = length(rel);
+    if (dist < 0.06 || dist > 9.5) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      return;
+    }
+    vec3 dir = rel / dist;
+    // Overlap skirt: valid down to dir.y * uHemiSign > -0.18
+    float side = dir.y * uHemiSign;
+    if (side < -0.18) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      return;
+    }
+
+    float denom = 1.0 + side;
+    vec2 paraUV = (dir.xz / max(denom, 0.15)) * 0.82;
+
+    // Approximate conservative angular splat radius from max covariance diagonal
+    float maxVar = max(t1.x, max(t1.w, t2.y));
+    float worldRad = 1.65 * sqrt(max(maxVar, 1e-5));
+    float angRad = (worldRad / dist) * (1.65 / max(denom, 0.25));
+
+    vCorner = aCorner;
+    vDist = dist / 10.0;
+    vClipSide = side;
+    gl_Position = vec4(paraUV + aCorner * angRad, vDist * 2.0 - 1.0, 1.0);
+  }`;
+
+  const SHADOW_SPLAT_FS = `#version 300 es
+  precision highp float;
+  in vec2 vCorner;
+  in float vDist;
+  in float vClipSide;
+  out vec4 fragColor;
+  void main() {
+    if (vClipSide < -0.18 || dot(vCorner, vCorner) > 0.82) discard;
+    fragColor = vec4(0.0, 0.0, 0.0, vDist); // opaque blocker: 0 transmittance, depth written to Z-buffer
+  }`;
+
+  // Analytic glass & wine shadow transmittance rendered per tile into RGBA16F (direct unrefracted attenuation)
+  const SHADOW_GLASS_FS = `#version 300 es
+  precision highp float;
+  in vec2 vUV;
+  uniform vec3 uLightPos;
+  uniform float uHemiSign;
+  ${COMMON_SCENE_GLSL}
+  out vec4 fragColor;
+
+  void main() {
+    // Reconstruct ray direction from dual-paraboloid tile UV
+    vec2 p = (vUV * 2.0 - 1.0) / 0.82;
+    float r2 = dot(p, p);
+    if (r2 > 1.45) discard;
+    // Inverse paraboloid map: p_orig = dir.xz / (1 + s*dir.y) => dir.xz = 2*p/(1+r2), s*dir.y = (1-r2)/(1+r2)
+    vec3 dir = normalize(vec3(2.0 * p.x, uHemiSign * (1.0 - r2), 2.0 * p.y));
+
+    vec3 trans = vec3(1.0);
+    float hitDist = 1.0;
+    bool anyHit = false;
+
+    for (int v = 0; v < 3; v++) {
+      vec3 baseC = uVessels[v].xyz;
+      float rBound = (v == 0) ? 0.58 : ((v == 1) ? 0.30 : 0.28);
+      vec2 tCyl = intersectCylinder(uLightPos, dir, baseC, rBound, uVessels[v].w + 0.02);
+      if (tCyl.x < tCyl.y && tCyl.y > 0.05) {
+        float t = max(tCyl.x, 0.05);
+        float dt = (tCyl.y - t) / 22.0;
+        float glassPath = 0.0;
+        float winePath = 0.0;
+        float firstHit = 10.0;
+        for (int i = 0; i < 22; i++) {
+          vec3 lp = (uLightPos + dir * (t + 0.5 * dt)) - baseC;
+          float dg = sdVesselGlass(v, lp);
+          float dw = sdVesselWine(v, lp);
+          if (dg < 0.0) {
+            glassPath += dt;
+            firstHit = min(firstHit, t);
+          } else if (dw < 0.0) {
+            winePath += dt;
+            firstHit = min(firstHit, t);
+          } else if (v == 2 && abs(dg) < 0.022) {
+            winePath += glass2WineFilm(lp) * 0.5;
+          }
+          t += dt;
+        }
+        if (glassPath > 0.001 || winePath > 0.001) {
+          anyHit = true;
+          hitDist = min(hitDist, firstHit / 10.0);
+          // Glass refracts ~78% of straight-line rays away (replaced by focused photon caustics!),
+          // and wine absorbs via Beer-Lambert + lens deflection
+          float lensDeflect = exp(-glassPath * 16.0 - (winePath > 0.005 ? 1.35 : 0.0));
+          vec3 beer = exp(-WINE_SIGMA * winePath * 0.85);
+          trans *= clamp(0.14 + 0.86 * lensDeflect, 0.12, 1.0) * mix(vec3(1.0), beer, 0.92);
+        }
+      }
+    }
+
+    if (!anyHit) discard;
+    fragColor = vec4(trans, hitDist);
+  }`;
+
+  // =========================================================================
+  // 8. PASS 2 SHADERS: EWA 3D GAUSSIAN SPLAT DEPTH & LIGHTING PASS (640x360)
+  // =========================================================================
+  const SPLAT_COMMON_VS = `#version 300 es
+  precision highp float;
+  precision highp int;
+
+  layout(location = 0) in vec2 aCorner;
+  layout(location = 1) in uint aSplatIdx;
+
+  uniform sampler2D uSplatTex;
+  uniform mat4 uView;
+  uniform vec2 uFocalPx;      // (fx, fy) in 640x360 pixels
+  uniform vec2 uScreenSnap;   // pixel-snapped breathing drift in NDC
+  uniform vec3 uCandlePos[3];
+  uniform vec3 uWickPos[3];
+  uniform vec3 uFlameLean[3]; // xz lean + y stretch factor
+  uniform vec3 uFlameLit;     // [0..1] lit state per candle
+  uniform vec4 uPuffState[3]; // (px, py, pz, age)
+  uniform vec2 uDraughtVec;
+  uniform float uTime;
+
+  out vec2 vCorner;
+  out vec2 vRadiiPx;
+  out vec3 vWorldPos;
+  out vec3 vNormal;
+  out vec3 vAlbedo;
+  out float vOpacity;
+  flat out int vMatType;
+  flat out int vObjId;
+  out float vSpecRough;
+  out float vViewDist;
+
+  vec4 fetchSplat(int idx, int off) {
+    int col = (idx & 255) * 5 + off;
+    int row = idx >> 8;
+    return texelFetch(uSplatTex, ivec2(col, row), 0);
+  }
+
+  // Smooth 3D curl-like displacement for flame sway & smoke wisps
+  vec3 flameSway(vec3 p, float hNorm, float seed, int cIdx) {
+    float t = uTime;
+    float s = float(cIdx) * 4.7 + seed * 1.9;
+    float w1 = sin(t * 5.2 + hNorm * 4.5 + s) * 0.016 + sin(t * 11.3 - hNorm * 7.0 + s * 1.7) * 0.007;
+    float w2 = cos(t * 4.6 + hNorm * 4.0 + s * 1.3) * 0.016 + cos(t * 9.7 - hNorm * 6.5 + s) * 0.007;
+    vec2 lean = uFlameLean[cIdx].xy * pow(hNorm, 1.35);
+    float stretch = uFlameLean[cIdx].z;
+    return vec3(
+      p.x * (1.0 - 0.12 * stretch) + (w1 + lean.x) * hNorm,
+      p.y * (1.0 + 0.28 * stretch) * max(uFlameLit[cIdx], 0.01),
+      p.z * (1.0 - 0.12 * stretch) + (w2 + lean.y) * hNorm
+    );
+  }
+
+  void main() {
+    int idx = int(aSplatIdx);
+    vec4 t0 = fetchSplat(idx, 0);
+    vec4 t1 = fetchSplat(idx, 1);
+    vec4 t2 = fetchSplat(idx, 2);
+    vec4 t3 = fetchSplat(idx, 3);
+    vec4 t4 = fetchSplat(idx, 4);
+
+    vec3 pos = t0.xyz;
+    int objId = int(t0.w + 0.5);
+    int matType = int(t4.y + 0.5);
+    float opacity = t4.x;
+    float specRough = t4.z;
+    float seed = t4.w;
+
+    mat3 cov = mat3(
+      t1.x, t1.y, t1.z,
+      t1.y, t1.w, t2.x,
+      t1.z, t2.x, t2.y
+    );
+    vec3 normal = normalize(vec3(t2.z, t2.w, t3.x));
+    vec3 albedo = t3.yzw;
+
+    if (objId >= 1 && objId <= 3) {
+      pos += uCandlePos[objId - 1];
+    } else if (objId >= 4 && objId <= 6) {
+      int ci = objId - 4;
+      float lit = uFlameLit[ci];
+      if (lit < 0.02) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+      }
+      pos = uWickPos[ci] + flameSway(pos, specRough, seed, ci);
+      cov *= (0.35 + 0.65 * lit);
+      opacity *= lit;
+    } else if (objId >= 7 && objId <= 9) {
+      int ci = objId - 7;
+      // Thin rising smoke wisps from lit or recently extinguished candle
+      float h = fract(pos.y + uTime * 0.19 + seed * 0.37);
+      float lit = uFlameLit[ci];
+      float wispVis = (0.35 + 0.65 * (1.0 - lit)) * sin(h * 3.14159);
+      float curlX = sin(h * 6.5 - uTime * 1.4 + seed * 6.28) * 0.09 * h + uDraughtVec.x * 0.45 * h;
+      float curlZ = cos(h * 5.8 - uTime * 1.2 + seed * 6.28) * 0.09 * h + uDraughtVec.y * 0.45 * h;
+      pos = vec3(
+        uWickPos[ci].x + pos.x + curlX,
+        uWickPos[ci].y + 0.19 * lit + h * 1.35,
+        uWickPos[ci].z + pos.z + curlZ
+      );
+      float grow = 0.6 + h * 1.8;
+      cov *= grow * grow;
+      opacity *= wispVis;
+      if (opacity < 0.006) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    } else if (objId >= 10 && objId <= 12) {
+      // Blow-out smoke puff!
+      int ci = objId - 10;
+      float age = uPuffState[ci].w;
+      if (age < 0.0 || age > 3.2) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+      }
+      float uAge = age / 3.2;
+      vec3 drift = vec3(
+        uDraughtVec.x * age * 0.4 + sin(age * 2.5 + seed * 9.0) * 0.08 * age,
+        age * 0.58,
+        uDraughtVec.y * age * 0.4 + cos(age * 2.2 + seed * 9.0) * 0.08 * age
+      );
+      pos = uPuffState[ci].xyz + pos * (0.25 + age * 1.65) + drift;
+      float grow = 0.7 + age * 1.5;
+      cov *= grow * grow;
+      opacity *= pow(1.0 - uAge, 1.6);
+    } else if (objId == 13) {
+      // Drifting dust motes in lazy room convection currents
+      pos.x += sin(uTime * 0.27 + seed * 12.0) * 0.18 + uDraughtVec.x * 0.12;
+      pos.y += cos(uTime * 0.19 + seed * 9.0) * 0.12;
+      pos.z += sin(uTime * 0.23 + seed * 7.0) * 0.18 + uDraughtVec.y * 0.12;
+    }
+
+    vec4 pCam4 = uView * vec4(pos, 1.0);
+    float d = -pCam4.z;
+    if (d < 0.25 || d > 15.0) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      return;
+    }
+
+    // Exact EWA 3D covariance projection to 640x360 pixel space
+    // Rows of camera rotation W (note GLSL column-major: row i is vec3(uView[0][i], uView[1][i], uView[2][i]))
+    vec3 rx = vec3(uView[0][0], uView[1][0], uView[2][0]);
+    vec3 ry = vec3(uView[0][1], uView[1][1], uView[2][1]);
+    vec3 rz = vec3(uView[0][2], uView[1][2], uView[2][2]);
+
+    float invD = 1.0 / d;
+    float invD2 = invD * invD;
+    vec3 tRow0 = (uFocalPx.x * invD) * rx + (uFocalPx.x * pCam4.x * invD2) * rz;
+    vec3 tRow1 = (uFocalPx.y * invD) * ry + (uFocalPx.y * pCam4.y * invD2) * rz;
+
+    vec3 cT0 = cov * tRow0;
+    vec3 cT1 = cov * tRow1;
+    float a = dot(tRow0, cT0) + 0.28;
+    float b = dot(tRow0, cT1);
+    float c = dot(tRow1, cT1) + 0.28;
+
+    float mu = 0.5 * (a + c);
+    float halfDiff = 0.5 * (a - c);
+    float disc = sqrt(halfDiff * halfDiff + b * b + 1e-8);
+    float lam1 = max(mu + disc, 0.30);
+    float lam2 = max(mu - disc, 0.30);
+
+    float kScale = (matType == 7 || matType == 8) ? 2.05 : 1.72;
+    float r1 = clamp(kScale * sqrt(lam1), 0.75, 30.0);
+    float r2 = clamp(kScale * sqrt(lam2), 0.75, 30.0);
+
+    vec2 e1 = (abs(b) > 1e-5) ? normalize(vec2(b, lam1 - a)) : ((a >= c) ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+    vec2 e2 = vec2(-e1.y, e1.x);
+
+    vec2 centerPx = vec2(uFocalPx.x * pCam4.x * invD, uFocalPx.y * pCam4.y * invD);
+    vec2 offsetPx = aCorner.x * r1 * e1 + aCorner.y * r2 * e2;
+    vec2 finalNDC = (centerPx + offsetPx) * vec2(2.0 / 640.0, 2.0 / 360.0) + uScreenSnap;
+
+    // Perspective depth for depth prepass
+    float zNear = 0.25, zFar = 15.0;
+    float ndcZ = ((zFar + zNear) / (zFar - zNear)) - (2.0 * zFar * zNear) / ((zFar - zNear) * d);
+
+    vCorner = aCorner;
+    vRadiiPx = vec2(r1, r2);
+    vWorldPos = pos;
+    vNormal = normal;
+    vAlbedo = albedo;
+    vOpacity = opacity;
+    vMatType = matType;
+    vObjId = objId;
+    vSpecRough = specRough;
+    vViewDist = d;
+
+    gl_Position = vec4(finalNDC, ndcZ, 1.0);
+  }`;
+
+  const SPLAT_DEPTH_FS = `#version 300 es
+  precision highp float;
+  in vec2 vCorner;
+  in vec2 vRadiiPx;
+  in float vOpacity;
+  flat in int vMatType;
+  in float vViewDist;
+  out vec4 fragDepth;
+  void main() {
+    // Only solid world splats write occlusion depth (skip flames, smoke, dust)
+    if (vMatType >= 7 || vOpacity < 0.65) discard;
+    float r = length(vCorner);
+    if (r > 0.88) discard;
+    fragDepth = vec4(vViewDist, 0.0, 0.0, 1.0);
+  }`;
+
+  const SPLAT_COLOR_FS = `#version 300 es
+  precision highp float;
+  precision highp int;
+
+  in vec2 vCorner;
+  in vec2 vRadiiPx;
+  in vec3 vWorldPos;
+  in vec3 vNormal;
+  in vec3 vAlbedo;
+  in float vOpacity;
+  flat in int vMatType;
+  flat in int vObjId;
+  in float vSpecRough;
+  in float vViewDist;
+
+  uniform sampler2D uShadowTex;    // RGBA16F glass transmittance + distance in .a
+  uniform sampler2D uShadowDepth;  // DEPTH_COMPONENT24 opaque splat distance
+  uniform vec3 uCamPos;
+  uniform vec3 uLightPos[3];
+  uniform vec3 uLightCol[3];       // warm ~1800K flickering intensity * colour
+  uniform vec3 uFlameSize;         // per-candle soft shadow radius
+  uniform vec3 uFlameLit;
+
+  out vec4 fragColor;
+
+  const vec2 VOGEL[8] = vec2[8](
+    vec2( 0.250,  0.000), vec2(-0.295,  0.272), vec2( 0.044, -0.498), vec2( 0.431,  0.402),
+    vec2(-0.669, -0.118), vec2( 0.449, -0.606), vec2(-0.145,  0.808), vec2(-0.752,  0.506)
+  );
+
+  // Sample omnidirectional dual-paraboloid shadow map for candle cIdx with flame-size-scaled PCF
+  vec3 evalCandleShadow(int cIdx, vec3 worldP, vec3 N) {
+    vec3 rel = worldP - uLightPos[cIdx];
+    float dist = length(rel);
+    if (dist < 0.08 || dist > 9.4) return vec3(1.0);
+    vec3 dir = rel / dist;
+
+    float hemi = (dir.y <= 0.0) ? -1.0 : 1.0;
+    float row = (dir.y <= 0.0) ? 0.0 : 1.0;
+    float denom = 1.0 + dir.y * hemi;
+    vec2 basePara = (dir.xz / max(denom, 0.15)) * 0.82 * 0.5 + 0.5;
+
+    float dNorm = dist / 10.0;
+    float bias = 0.0038 + 0.0045 * (1.0 - abs(dot(N, -dir)));
+    // Soft shadow penumbra scaled by flame size & propagation distance
+    float penumbraUV = uFlameSize[cIdx] * clamp((dist - 0.18) * 0.022, 0.0025, 0.026);
+
+    float tileMinX = float(cIdx) / 3.0;
+    float tileMaxX = float(cIdx + 1) / 3.0;
+    float tileMinY = row * 0.5;
+    float tileMaxY = (row + 1.0) * 0.5;
+
+    float splatVis = 0.0;
+    vec3 glassTrans = vec3(0.0);
+    float rot = fract(sin(dot(worldP.xz, vec2(12.9898, 78.233))) * 43758.5453) * 6.283185;
+    float cr = cos(rot), sr = sin(rot);
+    mat2 rotM = mat2(cr, -sr, sr, cr);
+
+    for (int k = 0; k < 8; k++) {
+      vec2 pUV = clamp(basePara + (rotM * VOGEL[k]) * penumbraUV, vec2(0.003), vec2(0.997));
+      vec2 atlasUV = vec2(mix(tileMinX, tileMaxX, pUV.x), mix(tileMinY, tileMaxY, pUV.y));
+
+      float blockerD = texture(uShadowDepth, atlasUV).r;
+      splatVis += (dNorm - bias <= blockerD) ? 1.0 : 0.0;
+
+      vec4 gSample = texture(uShadowTex, atlasUV);
+      // Only attenuate by glass if the glass is closer to the flame than the receiver!
+      if (gSample.a > 0.001 && dNorm > gSample.a + 0.006) {
+        glassTrans += gSample.rgb;
+      } else {
+        glassTrans += vec3(1.0);
+      }
+    }
+    return (splatVis * 0.125) * (glassTrans * 0.125);
+  }
+
+  void main() {
+    float r = length(vCorner);
+    if (r > 1.0) discard;
+
+    // Firm core with 1-pixel soft rim for crisp pixel-art splats (softer only on flames/smoke)
+    float alpha;
+    if (vMatType == 7 || vMatType == 8) {
+      alpha = vOpacity * pow(max(0.0, 1.0 - r * r), 1.35);
+    } else {
+      float dirRadPx = length(vec2(vCorner.x * vRadiiPx.x, vCorner.y * vRadiiPx.y)) / max(r, 1e-4);
+      float edgePx = (1.0 - r) * dirRadPx;
+      alpha = vOpacity * smoothstep(0.0, 0.92, edgePx);
+    }
+    if (alpha < 0.005) discard;
+
+    // Emissive flame splats
+    if (vMatType == 7) {
+      // Brighter hot core toward center of each flame splat
+      vec3 col = vAlbedo * (0.75 + 0.45 * (1.0 - r * r));
+      fragColor = vec4(col * alpha, alpha);
+      return;
+    }
+
+    vec3 N = normalize(vNormal);
+    vec3 V = normalize(uCamPos - vWorldPos);
+
+    // Very faint cool Caravaggio room bounce (bruised plum & cold slate in far corners, never pure black!)
+    float cornerDist = clamp(length(vWorldPos.xz) * 0.22, 0.0, 1.0);
+    vec3 coolSlate = vec3(0.018, 0.023, 0.036);
+    vec3 bruisedPlum = vec3(0.026, 0.016, 0.030);
+    vec3 roomBounce = mix(bruisedPlum, coolSlate, cornerDist) * (0.72 + 0.28 * N.y);
+
+    // Smoke & dust motes: volumetric point-light scattering from all 3 candles
+    if (vMatType == 8 || vMatType == 9) {
+      vec3 scatter = (vMatType == 8) ? roomBounce * 0.55 : vec3(0.0);
+      for (int i = 0; i < 3; i++) {
+        if (uFlameLit[i] < 0.01) continue;
+        vec3 Lvec = uLightPos[i] - vWorldPos;
+        float d2 = dot(Lvec, Lvec) + 0.04;
+        vec3 L = Lvec * inversesqrt(d2);
+        // Dust motes only glimmer softly near lit candle flames; smoke catches light across the room
+        float nearMask = (vMatType == 9) ? exp(-d2 * 1.35) : 1.0;
+        float phase = 0.65 + 0.35 * max(dot(-L, V), 0.0);
+        scatter += uLightCol[i] * (phase / d2) * 0.22 * nearMask;
+      }
+      vec3 col = vAlbedo * scatter;
+      fragColor = vec4(col * alpha, alpha);
+      return;
+    }
+
+    // Solid surface shading from all 3 flickering candles
+    vec3 totalLight = vAlbedo * roomBounce;
+
+    for (int i = 0; i < 3; i++) {
+      if (uFlameLit[i] < 0.005 && !(vMatType == 4 && vObjId == i + 1)) continue;
+      vec3 Lvec = uLightPos[i] - vWorldPos;
+      float dist2 = dot(Lvec, Lvec);
+      float dist = sqrt(dist2);
+      vec3 L = Lvec / max(dist, 1e-4);
+
+      // Inverse-square 1800K candlelight falloff
+      vec3 radiance = uLightCol[i] / (dist2 + 0.09);
+
+      // Self-candle wax subsurface scattering: top of each candle near its flame glows warm & translucent!
+      if (vMatType == 4 && vObjId == i + 1) {
+        float topSub = exp(-dist * 5.2) * (0.35 + 0.65 * vSpecRough);
+        totalLight += vAlbedo * uLightCol[i] * topSub * vec3(1.35, 0.62, 0.20) * 1.45;
+      }
+
+      float nDotL = max(dot(N, L), 0.0);
+      // Linen cloth translucency: candle behind a raised fold glows warmly through the cloth!
+      float backGlow = 0.0;
+      if (vMatType == 1) {
+        float wrapBack = max(dot(-N, L) + 0.25, 0.0) * 0.8;
+        float viewThrough = pow(max(dot(-L, V), 0.0), 1.6);
+        backGlow = vSpecRough * (0.28 * wrapBack + 0.55 * viewThrough);
+      } else if (vMatType == 4 || vMatType == 6) {
+        // Gentle subsurface wrap on wax & grape skins from neighbouring candles
+        backGlow = 0.16 * max(dot(-N, L) + 0.35, 0.0);
+      }
+
+      if (nDotL > 0.001 || backGlow > 0.001) {
+        // For back-lit linen fold translucency, sample shadow slightly shifted toward light so the fold ridge doesn't self-block its own glow
+        vec3 shadPos = (backGlow > nDotL && vMatType == 1) ? (vWorldPos + L * 0.07) : vWorldPos;
+        vec3 vis = (vObjId == i + 1 && vMatType == 4 && vSpecRough > 0.72) ? vec3(1.0) : evalCandleShadow(i, shadPos, N);
+
+        // Chromatic adaptation on white linen so candlelit cloth reads as warm ivory-cream (contrasting ruby caustics & plum shadows!)
+        vec3 surfRad = radiance;
+        if (vMatType == 1) {
+          float radLum = dot(radiance, vec3(0.42, 0.43, 0.15));
+          surfRad = mix(radiance, vec3(radLum) * vec3(1.14, 1.02, 0.86), 0.64) * 1.28;
+        }
+        vec3 diff = vAlbedo * nDotL;
+        vec3 transCol = vAlbedo * vec3(1.18, 0.78, 0.42) * backGlow;
+        totalLight += (diff + transCol) * surfRad * vis;
+
+        // Specular highlights on antique brass holders, waxy grapes, and varnished oak
+        if (nDotL > 0.0 && (vMatType == 3 || vMatType == 6 || vMatType == 0)) {
+          vec3 H = normalize(L + V);
+          float nDotH = max(dot(N, H), 0.0);
+          if (vMatType == 3) {
+            // Turned brass metallic gleam
+            float spec = pow(nDotH, 38.0) * 1.35 + pow(nDotH, 9.0) * 0.28;
+            totalLight += vec3(1.0, 0.78, 0.38) * spec * radiance * vis;
+          } else if (vMatType == 6) {
+            // Waxy grape bloom sheen
+            float spec = pow(nDotH, 22.0) * 0.32;
+            totalLight += vec3(0.95, 0.82, 0.88) * spec * radiance * vis;
+          } else {
+            // Subtle aged oak varnish sheen
+            float spec = pow(nDotH, 16.0) * 0.14 * vSpecRough;
+            totalLight += vec3(0.95, 0.72, 0.45) * spec * radiance * vis;
+          }
+        }
+      }
+    }
+
+    // Subtle extinguished wick ember glow for 0.8s right after blowing out
+    if (vMatType == 4 && vObjId >= 1 && vObjId <= 3 && vSpecRough > 0.88 && uFlameLit[vObjId - 1] < 0.3 && uFlameLit[vObjId - 1] > 0.002) {
+      totalLight += vec3(1.8, 0.35, 0.05) * uFlameLit[vObjId - 1];
+    }
+
+    // Prevent non-emissive solid surfaces from ever blowing out to flame-core white (#fff8e7)
+    totalLight = min(totalLight, vec3(2.05));
+    fragColor = vec4(totalLight * alpha, alpha);
+  }`;
+
+  // =========================================================================
+  // 9. PASS 3 SHADERS: 60K GPU PHOTON SPLATTING CAUSTICS (640x360)
+  //    Shoots ~61,440 photons per frame from the lit flames through the
+  //    analytic decanter & glasses (with R/G/B dispersion & wine absorption)
+  //    onto the tablecloth, oak table, and back wall!
+  // =========================================================================
+  const PHOTON_CAUSTIC_VS = `#version 300 es
+  precision highp float;
+  precision highp int;
+
+  uniform mat4 uViewProj;
+  uniform vec2 uScreenSnap;
+  uniform vec3 uLightPos[3];
+  uniform vec3 uLightCol[3];
+  uniform vec3 uFlameLit;
+  uniform float uFrameSeed;
+
+  ${COMMON_SCENE_GLSL}
+
+  out vec3 vPhotonFlux;
+  out float vHitDepth;
+
+  // Low-discrepancy R2 + integer hash for crisp, low-noise 60k photon sampling
+  uint hashU(uint x) {
+    x ^= x >> 16u;
+    x *= 0x7feb352du;
+    x ^= x >> 15u;
+    x *= 0x846ca68bu;
+    x ^= x >> 16u;
+    return x;
+  }
+  vec2 sampleR2(int idx, float frameOff) {
+    float g = 1.32471795724;
+    float a1 = 1.0 / g;
+    float a2 = 1.0 / (g * g);
+    return fract(vec2(0.5 + float(idx) * a1 + frameOff * 0.27, 0.5 + float(idx) * a2 + frameOff * 0.41));
+  }
+
+  vec3 glassGrad(int v, vec3 p) {
+    const float e = 0.0025;
+    return normalize(vec3(
+      sdVesselGlass(v, p + vec3(e, 0.0, 0.0)) - sdVesselGlass(v, p - vec3(e, 0.0, 0.0)),
+      sdVesselGlass(v, p + vec3(0.0, e, 0.0)) - sdVesselGlass(v, p - vec3(0.0, e, 0.0)),
+      sdVesselGlass(v, p + vec3(0.0, 0.0, e)) - sdVesselGlass(v, p - vec3(0.0, 0.0, e))
+    ));
+  }
+  vec3 wineGrad(int v, vec3 p) {
+    const float e = 0.0025;
+    return normalize(vec3(
+      sdVesselWine(v, p + vec3(e, 0.0, 0.0)) - sdVesselWine(v, p - vec3(e, 0.0, 0.0)),
+      sdVesselWine(v, p + vec3(0.0, e, 0.0)) - sdVesselWine(v, p - vec3(0.0, e, 0.0)),
+      sdVesselWine(v, p + vec3(0.0, 0.0, e)) - sdVesselWine(v, p - vec3(0.0, 0.0, e))
+    ));
+  }
+
+  float schlickF(float cosTheta, float n1, float n2) {
+    float r0 = (n1 - n2) / (n1 + n2);
+    r0 *= r0;
+    float c = clamp(1.0 - cosTheta, 0.0, 1.0);
+    return r0 + (1.0 - r0) * c * c * c * c * c;
+  }
+
+  void main() {
+    int id = gl_VertexID;
+    float totalLit = uFlameLit.x + uFlameLit.y + uFlameLit.z;
+    if (totalLit < 0.01) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      gl_PointSize = 0.0;
+      return;
+    }
+
+    // Assign photon to one of the lit flames proportional to lit weight
+    uint h = hashU(uint(id) + uint(uFrameSeed * 65537.0));
+    float pickF = float(h & 1023u) / 1024.0 * totalLit;
+    int cIdx = (pickF < uFlameLit.x) ? 0 : ((pickF < uFlameLit.x + uFlameLit.y) ? 1 : 2);
+    if (uFlameLit[cIdx] < 0.01) {
+      cIdx = (uFlameLit.x >= uFlameLit.y && uFlameLit.x >= uFlameLit.z) ? 0 : ((uFlameLit.y >= uFlameLit.z) ? 1 : 2);
+    }
+
+    // Split photons across the 3 vessels: 46% Decanter, 30% Half-Full Glass, 24% Almost-Empty Glass
+    float pickV = float((h >> 10u) & 1023u) / 1024.0;
+    int v = (pickV < 0.46) ? 0 : ((pickV < 0.76) ? 1 : 2);
+    float vesselShare = (v == 0) ? 0.46 : ((v == 1) ? 0.30 : 0.24);
+
+    // Subtle per-photon dispersion jitter across [1.510 .. 1.535] for smooth rainbow fringe on clear glass caustics
+    // while carrying full RGB Beer-Lambert wine absorption (eliminates isolated RGB confetti speckles!)
+    float dispU = float((h >> 20u) & 255u) / 255.0 - 0.5; // [-0.5, +0.5]
+    float nGlass = 1.520 + dispU * 0.025;
+    float nWine  = 1.340 + dispU * 0.010;
+
+    // Jitter origin within the finite 3D candle flame volume so flame size naturally shapes caustics
+    vec2 xiFlame = sampleR2(id * 3 + 1, uFrameSeed * 1.7);
+    float angF = xiFlame.x * 2.0 * PI;
+    vec3 ro = uLightPos[cIdx] + vec3(cos(angF) * 0.020, (xiFlame.y - 0.5) * 0.075, sin(angF) * 0.020);
+
+    // Aim photon tightly into active optical bowl/belly of vessel v so photons concentrate in dense pools!
+    vec3 vBase = uVessels[v].xyz;
+    float vH = uVessels[v].w;
+    float vR = (v == 0) ? 0.55 : ((v == 1) ? 0.29 : 0.27);
+    float targetCenterY = (v == 0) ? 0.44 : ((v == 1) ? 0.73 : 0.67);
+    float targetHalfH   = (v == 0) ? 0.42 : ((v == 1) ? 0.34 : 0.31);
+    vec3 vCenter = vBase + vec3(0.0, targetCenterY, 0.0);
+    vec3 toV = vCenter - ro;
+    float distToV = length(toV);
+    vec3 coneAxis = toV / max(distToV, 1e-4);
+    float coneRadius = length(vec2(vR, targetHalfH));
+    float sinMax = clamp(coneRadius / max(distToV, coneRadius + 0.05), 0.02, 0.94);
+    float cosMax = sqrt(max(0.0, 1.0 - sinMax * sinMax));
+    float solidAngle = 2.0 * PI * (1.0 - cosMax);
+
+    vec2 xiCone = sampleR2(id, uFrameSeed);
+    float cosTheta = mix(1.0, cosMax, xiCone.x);
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+    float phiCone = xiCone.y * 2.0 * PI;
+
+    vec3 upRef = (abs(coneAxis.y) < 0.95) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 uVec = normalize(cross(upRef, coneAxis));
+    vec3 vVec = cross(coneAxis, uVec);
+    vec3 rd = normalize(coneAxis * cosTheta + (uVec * cos(phiCone) + vVec * sin(phiCone)) * sinTheta);
+    vec3 initRd = rd;
+
+    // Intersect vessel bounding cylinder
+    vec2 tCyl = intersectCylinder(ro, rd, vBase, vR + 0.02, vH + 0.02);
+    if (tCyl.x >= tCyl.y || tCyl.y <= 0.0) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      gl_PointSize = 0.0;
+      return;
+    }
+
+    // March to first glass entry
+    vec3 p = ro + rd * max(tCyl.x, 0.02) - vBase;
+    float maxRange = tCyl.y - max(tCyl.x, 0.02);
+    float traveled = 0.0;
+    bool hitEntry = false;
+    for (int s = 0; s < 34; s++) {
+      float dg = sdVesselGlass(v, p);
+      if (dg < 0.0015) { hitEntry = true; break; }
+      float stepLen = max(dg * 0.72, 0.007);
+      p += rd * stepLen;
+      traveled += stepLen;
+      if (traveled > maxRange) break;
+    }
+    if (!hitEntry) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      gl_PointSize = 0.0;
+      return;
+    }
+
+    // Multi-medium photon trace through Glass (med=1), Wine (med=2), and Air cavity (med=0)
+    int med = 0;
+    vec3 throughputRGB = vec3(1.0);
+    float totalWinePath = 0.0;
+    float filmAbsorb = 0.0;
+    int refrCount = 0;
+
+    for (int bounce = 0; bounce < 7; bounce++) {
+      vec3 nrm;
+      int nextMed = med;
+      if (med == 0) {
+        float dg = sdVesselGlass(v, p);
+        float dw = sdVesselWine(v, p);
+        if (dg <= dw + 0.004) {
+          nrm = glassGrad(v, p);
+          nextMed = 1;
+        } else {
+          nrm = wineGrad(v, p);
+          nextMed = 2;
+        }
+      } else if (med == 1) {
+        nrm = -glassGrad(v, p);
+        if (sdVesselWine(v, p + rd * 0.006) < 0.004) {
+          nextMed = 2;
+        } else {
+          nextMed = 0;
+          if (v == 2) filmAbsorb += glass2WineFilm(p);
+        }
+      } else {
+        float dgNear = sdVesselGlass(v, p + rd * 0.006);
+        if (dgNear < 0.006) {
+          nrm = glassGrad(v, p);
+          nextMed = 1;
+        } else {
+          nrm = -wineGrad(v, p);
+          nextMed = 0;
+        }
+      }
+
+      if (dot(rd, nrm) > 0.0) nrm = -nrm;
+      float n1 = (med == 0) ? 1.0 : ((med == 1) ? nGlass : nWine);
+      float n2 = (nextMed == 0) ? 1.0 : ((nextMed == 1) ? nGlass : nWine);
+      float eta = n1 / n2;
+      float cosI = clamp(-dot(rd, nrm), 0.0, 1.0);
+      float F = schlickF(cosI, n1, n2);
+      vec3 refrDir = refract(rd, nrm, eta);
+
+      if (length(refrDir) < 0.001) {
+        rd = reflect(rd, nrm);
+        p += rd * 0.005;
+      } else {
+        rd = normalize(refrDir);
+        throughputRGB *= (1.0 - F * 0.82);
+        med = nextMed;
+        refrCount++;
+        p += rd * 0.005;
+      }
+
+      // March across the new medium until the next boundary (48 steps across wide decanter wine belly!)
+      if (med == 1) {
+        for (int s = 0; s < 30; s++) {
+          float dg = sdVesselGlass(v, p);
+          if (dg > -0.0008) break;
+          p += rd * clamp(-dg * 0.72, 0.003, 0.025);
+        }
+      } else if (med == 2) {
+        float wineDist = 0.0;
+        for (int s = 0; s < 48; s++) {
+          float dw = sdVesselWine(v, p);
+          if (dw > -0.0010) break;
+          float st = clamp(-dw * 0.76, 0.004, 0.042);
+          p += rd * st;
+          wineDist += st;
+        }
+        totalWinePath += wineDist;
+        // Beer-Lambert caustic absorption: rich glowing ruby-crimson through wine!
+        throughputRGB *= exp(-vec3(1.45, 14.5, 18.0) * wineDist);
+      } else {
+        bool hitAgain = false;
+        for (int s = 0; s < 34; s++) {
+          if (length(p.xz) > vR + 0.03 || p.y < -0.01 || p.y > vH + 0.03) break;
+          float dMin = min(sdVesselGlass(v, p), sdVesselWine(v, p));
+          if (dMin < 0.0018) { hitAgain = true; break; }
+          p += rd * max(dMin * 0.72, 0.006);
+        }
+        if (!hitAgain) break;
+      }
+      if (max(throughputRGB.r, max(throughputRGB.g, throughputRGB.b)) < 0.004) break;
+    }
+
+    if (med != 0 || refrCount < 2 || max(throughputRGB.r, throughputRGB.g) < 0.004) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      gl_PointSize = 0.0;
+      return;
+    }
+
+    if (filmAbsorb > 0.0) {
+      throughputRGB *= exp(-vec3(1.5, 13.5, 16.5) * filmAbsorb * 1.4);
+    }
+
+    // Subtle rainbow fringe on glass-only photons from refractive dispersion!
+    if (totalWinePath < 0.01) {
+      float bendAmt = clamp((1.0 - dot(initRd, rd)) * 2.5, 0.0, 1.0);
+      vec3 fringe = mix(vec3(1.16, 0.96, 0.76), vec3(0.80, 0.98, 1.22), dispU + 0.5);
+      throughputRGB *= mix(vec3(1.0), fringe, bendAmt * 0.65);
+    }
+
+    // Intersect escaped refracted photon ray (worldPos, rd) with tablecloth/table or back wall!
+    vec3 wPos = p + vBase;
+    vec3 hitPos = vec3(0.0);
+    vec3 recvAlbedo = vec3(0.92, 0.88, 0.82);
+    bool landed = false;
+
+    float tWall = (-2.86 - wPos.z) / (abs(rd.z) > 1e-5 ? rd.z : -1e-5);
+    if (rd.y < -0.012) {
+      float tTab = (0.04 - wPos.y) / rd.y;
+      if (tTab > 0.01 && tTab < 7.0) {
+        for (int k = 0; k < 3; k++) {
+          vec3 cand = wPos + rd * tTab;
+          float hSurf = clothFoldHeightG(cand.xz);
+          tTab += (cand.y - hSurf) / (-rd.y);
+        }
+        vec3 cand = wPos + rd * tTab;
+        if (cand.z > -2.86 && cand.z < 2.22 && abs(cand.x) < 4.0) {
+          hitPos = cand;
+          landed = true;
+          recvAlbedo = isOnClothG(cand.xz) ? vec3(0.95, 0.91, 0.86) : vec3(0.24, 0.13, 0.07);
+        }
+      }
+    }
+    if (!landed && rd.z < -0.02 && tWall > 0.02 && tWall < 7.5) {
+      vec3 cand = wPos + rd * tWall;
+      if (cand.y > -0.2 && cand.y < 3.5 && abs(cand.x) < 4.8) {
+        hitPos = cand;
+        landed = true;
+        recvAlbedo = vec3(0.12, 0.10, 0.10);
+      }
+    }
+
+    if (!landed) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      gl_PointSize = 0.0;
+      return;
+    }
+
+    vec4 clip = uViewProj * vec4(hitPos, 1.0);
+    if (clip.w <= 0.2) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      gl_PointSize = 0.0;
+      return;
+    }
+
+    // Physical photon flux: wine photons carry rich ruby energy into focused pools, glass photons form warm gold rings!
+    float flameWeight = totalLit / max(uFlameLit[cIdx], 0.15);
+    float wineBoost = (totalWinePath > 0.01) ? 2.35 : 0.95;
+    float baseEnergy = (solidAngle / (vesselShare * 61440.0)) * flameWeight * 1650.0 * wineBoost;
+    vec3 sourceCol = (totalWinePath > 0.01)
+      ? vec3(uLightCol[cIdx].r * 1.15, uLightCol[cIdx].g * 0.72, uLightCol[cIdx].b * 0.75)
+      : mix(uLightCol[cIdx], vec3(dot(uLightCol[cIdx], vec3(0.45, 0.40, 0.15))) * vec3(1.15, 0.95, 0.68), 0.55);
+
+    vPhotonFlux = sourceCol * recvAlbedo * throughputRGB * baseEnergy;
+    vHitDepth = clip.w;
+
+    clip.xy += uScreenSnap * clip.w;
+    gl_Position = clip;
+    gl_PointSize = 5.0;
+  }`;
+
+  const PHOTON_CAUSTIC_FS = `#version 300 es
+  precision highp float;
+  in vec3 vPhotonFlux;
+  in float vHitDepth;
+  uniform sampler2D uSplatDepthTex;
+  out vec4 fragColor;
+  void main() {
+    vec2 pc = gl_PointCoord * 2.0 - 1.0;
+    float r2 = dot(pc, pc);
+    if (r2 > 1.0) discard;
+
+    ivec2 pix = ivec2(gl_FragCoord.xy);
+    float sceneD = texelFetch(uSplatDepthTex, pix, 0).r;
+    if (sceneD > 0.1 && vHitDepth > sceneD + 0.14) discard;
+
+    float w = 1.0 - r2;
+    float kernel = w * w * 0.20;
+    fragColor = vec4(vPhotonFlux * kernel, 1.0);
+  }`;
+
+  // Temporal accumulation of caustic buffer + combining onto lit splat scene before Glass & Palette!
+  const CAUSTIC_ACCUM_FS = `#version 300 es
+  precision highp float;
+  in vec2 vUV;
+  uniform sampler2D uCausticNew;
+  uniform sampler2D uCausticPrev;
+  uniform float uBlendAlpha;
+  out vec4 fragColor;
+  void main() {
+    // Light 3x3 spatial tent filter on raw photon splats to turn discrete hits into dense silky pools
+    vec2 texel = vec2(1.0 / 640.0, 1.0 / 360.0);
+    vec3 c = texture(uCausticNew, vUV).rgb * 0.36;
+    c += texture(uCausticNew, vUV + vec2( texel.x, 0.0)).rgb * 0.11;
+    c += texture(uCausticNew, vUV + vec2(-texel.x, 0.0)).rgb * 0.11;
+    c += texture(uCausticNew, vUV + vec2(0.0,  texel.y)).rgb * 0.11;
+    c += texture(uCausticNew, vUV + vec2(0.0, -texel.y)).rgb * 0.11;
+    c += texture(uCausticNew, vUV + vec2( texel.x,  texel.y)).rgb * 0.05;
+    c += texture(uCausticNew, vUV + vec2(-texel.x,  texel.y)).rgb * 0.05;
+    c += texture(uCausticNew, vUV + vec2( texel.x, -texel.y)).rgb * 0.05;
+    c += texture(uCausticNew, vUV + vec2(-texel.x, -texel.y)).rgb * 0.05;
+
+    vec3 prev = texture(uCausticPrev, vUV).rgb;
+    fragColor = vec4(mix(prev, min(c, vec3(6.5)), uBlendAlpha), 1.0);
+  }`;
+
+  const SCENE_COMBINE_FS = `#version 300 es
+  precision highp float;
+  in vec2 vUV;
+  uniform sampler2D uSplatColorTex;
+  uniform sampler2D uCausticTex;
+  out vec4 fragColor;
+  void main() {
+    vec3 splat = texture(uSplatColorTex, vUV).rgb;
+    vec3 caust = texture(uCausticTex, vUV).rgb;
+    fragColor = vec4(splat + caust, 1.0);
+  }`;
+
+  // =========================================================================
+  // 10. PASS 4 SHADER: ANALYTIC RAY-TRACED GLASS & WINE (640x360 over bounds)
+  //     Index 1.52 with R/G/B dispersion (1.51, 1.52, 1.535), Wine index 1.34
+  //     with Beer-Lambert garnet-to-ruby absorption, curved meniscus, wine legs
+  //     on Glass 2, up to 4+ internal bounces with TIR, 3 dancing flame
+  //     reflections per glass, facet/rim glints, and refracted splat scene!
+  // =========================================================================
+  const GLASS_BOUNDS_VS = `#version 300 es
+  precision highp float;
+  const vec2 CORNERS[6] = vec2[6](
+    vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
+    vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)
+  );
+  uniform vec4 uBoundsUV; // (minU, minV, maxU, maxV) in [0, 1]
+  out vec2 vScreenUV;
+  void main() {
+    vec2 c = CORNERS[gl_VertexID];
+    vScreenUV = mix(uBoundsUV.xy, uBoundsUV.zw, c);
+    gl_Position = vec4(vScreenUV * 2.0 - 1.0, 0.0, 1.0);
+  }`;
+
+  const GLASS_FS = `#version 300 es
+  precision highp float;
+  precision highp int;
+
+  in vec2 vScreenUV;
+
+  uniform sampler2D uSceneTex;      // Lit splats + caustics (+ any glass behind this vessel)
+  uniform sampler2D uSplatDepthTex; // Linear view depth of opaque splats
+  uniform mat4 uInvViewProj;
+  uniform mat4 uViewProj;
+  uniform mat4 uView;
+  uniform vec2 uScreenSnap;
+  uniform vec3 uCamPos;
+  uniform int uVesselIdx;
+
+  uniform vec3 uWickPos[3];
+  uniform vec3 uFlameLean[3];
+  uniform vec3 uLightPos[3];
+  uniform vec3 uLightCol[3];
+  uniform vec3 uFlameLit;
+
+  ${COMMON_SCENE_GLSL}
+
+  out vec4 fragColor;
+
+  vec3 glassNormal(int v, vec3 p) {
+    const float e = 0.0018;
+    return normalize(vec3(
+      sdVesselGlass(v, p + vec3(e, 0.0, 0.0)) - sdVesselGlass(v, p - vec3(e, 0.0, 0.0)),
+      sdVesselGlass(v, p + vec3(0.0, e, 0.0)) - sdVesselGlass(v, p - vec3(0.0, e, 0.0)),
+      sdVesselGlass(v, p + vec3(0.0, 0.0, e)) - sdVesselGlass(v, p - vec3(0.0, 0.0, e))
+    ));
+  }
+
+  vec3 wineNormal(int v, vec3 p) {
+    const float e = 0.0022;
+    return normalize(vec3(
+      sdVesselWine(v, p + vec3(e, 0.0, 0.0)) - sdVesselWine(v, p - vec3(e, 0.0, 0.0)),
+      sdVesselWine(v, p + vec3(0.0, e, 0.0)) - sdVesselWine(v, p - vec3(0.0, e, 0.0)),
+      sdVesselWine(v, p + vec3(0.0, 0.0, e)) - sdVesselWine(v, p - vec3(0.0, 0.0, e))
+    ));
+  }
+
+  // Perturb inner bowl normal slightly on Glass 2 wine legs so tears catch specular highlights & refract!
+  vec3 perturbFilmNormal(vec3 p, vec3 nrm) {
+    const float e = 0.005;
+    float f0 = glass2WineFilm(p);
+    if (f0 <= 0.0001) return nrm;
+    float fx = glass2WineFilm(p + vec3(e, 0.0, 0.0)) - f0;
+    float fy = glass2WineFilm(p + vec3(0.0, e, 0.0)) - f0;
+    float fz = glass2WineFilm(p + vec3(0.0, 0.0, e)) - f0;
+    return normalize(nrm - vec3(fx, fy, fz) * 2.6);
+  }
+
+  float fresnelExact(float cosI, float eta) {
+    // eta = n1 / n2
+    float sin2T = eta * eta * max(0.0, 1.0 - cosI * cosI);
+    if (sin2T >= 1.0) return 1.0;
+    float cosT = sqrt(max(0.0, 1.0 - sin2T));
+    float rs = (eta * cosI - cosT) / (eta * cosI + cosT);
+    float rp = (cosI - eta * cosT) / (cosI + eta * cosT);
+    return 0.5 * (rs * rs + rp * rp);
+  }
+
+  // Evaluate analytic 3D dancing candle flames along any reflected or refracted ray!
+  // Ensures every glass shows crisp dancing reflections of all lit flames + glowing behind-glass flames!
+  vec3 evalFlamesAlongRay(vec3 ro, vec3 rd, float sharpness, float glintBoost) {
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 3; i++) {
+      float lit = uFlameLit[i];
+      if (lit < 0.01) continue;
+
+      // Flame spine from wick base to swaying tip
+      vec3 baseP = uWickPos[i];
+      vec3 tipP  = baseP + vec3(uFlameLean[i].x * 0.22, 0.21 * (1.0 + 0.25 * uFlameLean[i].z) * lit, uFlameLean[i].y * 0.22);
+      vec3 seg = tipP - baseP;
+      float segLen2 = max(dot(seg, seg), 1e-4);
+
+      // Closest approach between ray (ro + t*rd) and flame spine segment (baseP + s*seg)
+      vec3 w0 = ro - baseP;
+      float b = dot(rd, seg);
+      float d = dot(rd, w0);
+      float e = dot(seg, w0);
+      float denom = segLen2 - b * b;
+      float s = clamp((b * d - e) / max(denom, 1e-5), 0.0, 1.0);
+      float t = d + s * b;
+      if (t <= 0.02) continue;
+
+      vec3 flamePt = baseP + seg * s;
+      vec3 rayPt = ro + rd * t;
+      float radDist = length(rayPt - flamePt);
+
+      // Teardrop radius along flame spine
+      float flameR = (0.046 * sin(pow(s, 0.68) * PI) + 0.010) * sharpness;
+      float coreMask = exp(-pow(radDist / max(flameR * 0.55, 0.008), 2.0));
+      float haloMask = exp(-pow(radDist / max(flameR * 1.85, 0.018), 2.0));
+
+      vec3 fCol = mix(vec3(1.8, 0.65, 0.12), vec3(6.5, 4.8, 2.6), coreMask);
+      if (s < 0.18) fCol = mix(vec3(0.25, 0.55, 1.35), fCol, s / 0.18);
+
+      // Tiny star glint boost on high-curvature crystal facet ridges & glass rims
+      float star = pow(max(dot(rd, normalize(uLightPos[i] - ro)), 0.0), 420.0) * glintBoost;
+      sum += (fCol * (coreMask * 1.55 + haloMask * 0.35) + uLightCol[i] * star * 5.5) * lit;
+    }
+    return sum;
+  }
+
+  // Sample room environment for reflected rays (candles + warm cloth bounce + dark Caravaggio room)
+  vec3 evalReflectedEnv(vec3 ro, vec3 rd, float curvBoost, float sharpness) {
+    vec3 flames = evalFlamesAlongRay(ro, rd, sharpness, curvBoost);
+    // Subtle table cloth reflection when reflected ray points down toward table
+    vec3 room = mix(vec3(0.022, 0.018, 0.030), vec3(0.016, 0.022, 0.036), clamp(rd.y * 0.5 + 0.5, 0.0, 1.0));
+    if (rd.y < -0.04) {
+      float tTab = (0.03 - ro.y) / rd.y;
+      if (tTab > 0.02 && tTab < 4.5) {
+        vec3 hp = ro + rd * tTab;
+        if (isOnClothG(hp.xz) && hp.z < 2.2) {
+          // Estimate candle illumination on cloth point
+          vec3 clothL = vec3(0.02);
+          for (int i = 0; i < 3; i++) {
+            vec3 dL = uLightPos[i] - hp;
+            clothL += uLightCol[i] / (dot(dL, dL) + 0.25) * max(normalize(dL).y, 0.0) * 0.35;
+          }
+          room += vec3(0.75, 0.70, 0.64) * clothL * 0.32;
+        }
+      }
+    }
+    return room + flames;
+  }
+
+  // Sample refracted background splat + caustic buffer at the scene intersection of exited ray (wPos, rd)
+  vec3 sampleRefractedScene(vec3 wPos, vec3 rd, float vesselDepth) {
+    // Intersect exited ray with cloth/table or back wall so perspective refraction parallax is physically accurate!
+    float hitT = 1.6;
+    if (rd.y < -0.02) {
+      float tTab = (0.04 - wPos.y) / rd.y;
+      if (tTab > 0.02 && tTab < 6.5) {
+        vec3 c1 = wPos + rd * tTab;
+        float hS = clothFoldHeightG(c1.xz);
+        tTab += (c1.y - hS) / (-rd.y);
+        vec3 c2 = wPos + rd * tTab;
+        if (c2.z > -2.86 && c2.z < 2.35) hitT = tTab;
+      }
+    }
+    float tWall = (-2.86 - wPos.z) / (abs(rd.z) > 1e-5 ? rd.z : -1e-5);
+    if (rd.z < -0.02 && tWall > 0.02 && tWall < hitT) {
+      hitT = tWall;
+    }
+
+    vec3 targetWorld = wPos + rd * hitT;
+    vec4 clip = uViewProj * vec4(targetWorld, 1.0);
+    vec2 uv = (clip.xy / max(clip.w, 0.1)) * 0.5 + 0.5 + uScreenSnap * 0.5;
+    uv = clamp(uv, vec2(0.002), vec2(0.998));
+
+    // Reject foreground occluders (e.g. a candle dragged in front of the glass) from bleeding into refraction
+    ivec2 pix = ivec2(uv * vec2(640.0, 360.0));
+    float dSample = texelFetch(uSplatDepthTex, clamp(pix, ivec2(0), ivec2(639, 359)), 0).r;
+    vec3 bgCol;
+    if (dSample > 0.1 && dSample < vesselDepth - 0.18) {
+      // Fallback analytic lit cloth/wall when screen pixel is covered by a foreground candle
+      bgCol = vec3(0.030, 0.022, 0.034);
+      if (targetWorld.y < 0.25 && isOnClothG(targetWorld.xz)) {
+        for (int i = 0; i < 3; i++) {
+          vec3 dL = uLightPos[i] - targetWorld;
+          bgCol += vec3(0.76, 0.72, 0.66) * uLightCol[i] / (dot(dL, dL) + 0.2) * max(normalize(dL).y, 0.0);
+        }
+      }
+    } else {
+      bgCol = texture(uSceneTex, uv).rgb;
+    }
+
+    // Add direct magnified/bent behind-glass flame radiance (makes wine rim & meniscus blaze ruby when candle is behind!)
+    bgCol += evalFlamesAlongRay(wPos, rd, 1.35, 0.0);
+    return bgCol;
+  }
+
+  // Trace single dispersed wavelength channel (ch = 0:R 1.51, 1:G 1.52, 2:B 1.535) inside vessel v
+  float traceDispersedChannel(int v, vec3 entryP, vec3 entryN, vec3 camDir, int ch, float vesselDepth) {
+    float nGlass = (ch == 0) ? 1.510 : ((ch == 1) ? 1.520 : 1.535);
+    float nWine  = (ch == 0) ? 1.336 : ((ch == 1) ? 1.340 : 1.346);
+    float sigmaW = (ch == 0) ? WINE_SIGMA.r : ((ch == 1) ? WINE_SIGMA.g : WINE_SIGMA.b);
+
+    vec3 vBase = uVessels[v].xyz;
+    float vH = uVessels[v].w;
+    float vR = (v == 0) ? 0.57 : ((v == 1) ? 0.295 : 0.275);
+
+    vec3 rd = refract(camDir, entryN, 1.0 / nGlass);
+    if (length(rd) < 0.001) rd = reflect(camDir, entryN);
+    rd = normalize(rd);
+
+    vec3 p = entryP + rd * 0.004;
+    int med = 1; // Currently inside Glass wall
+    float trans = 1.0;
+    float internalGlow = 0.0;
+
+    for (int stepB = 0; stepB < 7; stepB++) {
+      // 1. March across current medium to next interface
+      if (med == 1) {
+        float tPrev = 0.0;
+        for (int s = 0; s < 30; s++) {
+          float dg = sdVesselGlass(v, p);
+          if (dg >= 0.0) {
+            // Refine boundary with 3 bisection steps
+            vec3 pA = p - rd * tPrev, pB = p;
+            for (int b = 0; b < 3; b++) {
+              vec3 pM = 0.5 * (pA + pB);
+              if (sdVesselGlass(v, pM) < 0.0) pA = pM; else pB = pM;
+            }
+            p = 0.5 * (pA + pB);
+            break;
+          }
+          tPrev = clamp(-dg * 0.72, 0.0028, 0.022);
+          p += rd * tPrev;
+        }
+        // Glass subtly absorbs tiny warm-green crystal tint over thick bases
+        trans *= 0.985;
+      } else if (med == 2) {
+        float winePath = 0.0;
+        float tPrev = 0.0;
+        for (int s = 0; s < 34; s++) {
+          float dw = sdVesselWine(v, p);
+          if (dw >= 0.0) {
+            vec3 pA = p - rd * tPrev, pB = p;
+            for (int b = 0; b < 3; b++) {
+              vec3 pM = 0.5 * (pA + pB);
+              if (sdVesselWine(v, pM) < 0.0) pA = pM; else pB = pM;
+            }
+            p = 0.5 * (pA + pB);
+            break;
+          }
+          tPrev = clamp(-dw * 0.75, 0.004, 0.032);
+          p += rd * tPrev;
+          winePath += tPrev;
+        }
+        // Beer-Lambert absorption in wine! Deep garnet where thick, glowing ruby at thin rim & meniscus!
+        trans *= exp(-sigmaW * winePath);
+
+        // Subtle forward ruby in-scattering at the thin glowing meniscus & edges when backlit by flames!
+        if (ch == 0 && winePath < 0.28) {
+          vec3 wMid = (p - rd * (0.5 * winePath)) + vBase;
+          for (int li = 0; li < 3; li++) {
+            if (uFlameLit[li] < 0.01) continue;
+            vec3 toL = uLightPos[li] - wMid;
+            float d2 = dot(toL, toL) + 0.12;
+            float fwd = pow(max(dot(rd, normalize(toL)), 0.0), 3.0);
+            internalGlow += trans * uLightCol[li].r * (0.16 + 0.55 * fwd) / d2 * min(winePath * 3.5, 1.0);
+          }
+        }
+      } else {
+        // Inside hollow Air cavity: march to next inner glass wall OR curved wine meniscus!
+        bool hitNext = false;
+        float tPrev = 0.0;
+        for (int s = 0; s < 34; s++) {
+          if (length(p.xz) > vR + 0.025 || p.y < -0.01 || p.y > vH + 0.025) break;
+          float dg = sdVesselGlass(v, p);
+          float dw = sdVesselWine(v, p);
+          float dMin = min(dg, dw);
+          if (dMin <= 0.0008) {
+            vec3 pA = p - rd * tPrev, pB = p;
+            for (int b = 0; b < 3; b++) {
+              vec3 pM = 0.5 * (pA + pB);
+              if (min(sdVesselGlass(v, pM), sdVesselWine(v, pM)) > 0.0008) pA = pM; else pB = pM;
+            }
+            p = 0.5 * (pA + pB);
+            hitNext = true;
+            break;
+          }
+          tPrev = clamp(dMin * 0.72, 0.0035, 0.028);
+          p += rd * tPrev;
+        }
+        if (!hitNext) break; // Escaped vessel cleanly into the room!
+      }
+
+      // 2. Determine interface normal & target medium at p
+      vec3 nrm;
+      int nextMed = 0;
+      if (med == 1) {
+        nrm = -glassNormal(v, p); // points inward into glass
+        if (sdVesselWine(v, p + rd * 0.005) < 0.004) {
+          nextMed = 2; // Glass -> Wine
+        } else {
+          nextMed = 0; // Glass -> Air
+          if (v == 2) {
+            float film = glass2WineFilm(p);
+            if (film > 0.0002) {
+              trans *= exp(-sigmaW * film * 1.45);
+              nrm = perturbFilmNormal(p, nrm);
+            }
+          }
+        }
+      } else if (med == 2) {
+        if (sdVesselGlass(v, p + rd * 0.005) < 0.005) {
+          nrm = glassNormal(v, p); // Wine -> Glass
+          nextMed = 1;
+        } else {
+          nrm = -wineNormal(v, p); // Wine -> Air across curved meniscus!
+          nextMed = 0;
+        }
+      } else {
+        float dg = sdVesselGlass(v, p);
+        float dw = sdVesselWine(v, p);
+        if (dg <= dw + 0.002) {
+          nrm = glassNormal(v, p); // Air -> Glass
+          nextMed = 1;
+          if (v == 2) {
+            float film = glass2WineFilm(p);
+            if (film > 0.0002) {
+              trans *= exp(-sigmaW * film * 1.45);
+              nrm = perturbFilmNormal(p, nrm);
+            }
+          }
+        } else {
+          nrm = wineNormal(v, p); // Air -> Wine (top of meniscus!)
+          nextMed = 2;
+        }
+      }
+
+      if (dot(rd, nrm) > 0.0) nrm = -nrm;
+      float n1 = (med == 0) ? 1.0 : ((med == 1) ? nGlass : nWine);
+      float n2 = (nextMed == 0) ? 1.0 : ((nextMed == 1) ? nGlass : nWine);
+      float eta = n1 / n2;
+      float cosI = clamp(-dot(rd, nrm), 0.0, 1.0);
+      float F = fresnelExact(cosI, eta);
+
+      // Accumulate internal Fresnel reflection of flames (gives secondary inner-wall & meniscus flame reflections!)
+      vec3 reflDir = reflect(rd, nrm);
+      vec3 innerRefl = evalReflectedEnv(p + vBase, reflDir, (v == 0) ? 0.5 : 0.25, mix(1.35, 2.75, pow(1.0 - cosI, 2.0)));
+      float reflCh = (ch == 0) ? innerRefl.r : ((ch == 1) ? innerRefl.g : innerRefl.b);
+      internalGlow += trans * F * reflCh * 0.78;
+
+      vec3 refr = refract(rd, nrm, eta);
+      if (length(refr) < 0.001) {
+        // Total Internal Reflection (up to 4 internal bounces!)
+        rd = reflDir;
+        p += rd * 0.0045;
+      } else {
+        trans *= (1.0 - F);
+        rd = normalize(refr);
+        med = nextMed;
+        p += rd * 0.0045;
+      }
+      if (trans < 0.004) break;
+    }
+
+    vec3 bg = sampleRefractedScene(p + vBase, rd, vesselDepth);
+    float bgCh = (ch == 0) ? bg.r : ((ch == 1) ? bg.g : bg.b);
+    return bgCh * trans + internalGlow;
+  }
+
+  void main() {
+    // Reconstruct primary camera ray (accounting for pixel-snapped breathing drift!)
+    vec2 ndc = (vScreenUV * 2.0 - 1.0) - uScreenSnap;
+    vec4 nearH = uInvViewProj * vec4(ndc, -1.0, 1.0);
+    vec4 farH  = uInvViewProj * vec4(ndc,  1.0, 1.0);
+    vec3 pNear = nearH.xyz / nearH.w;
+    vec3 pFar  = farH.xyz / farH.w;
+    vec3 ro = uCamPos;
+    vec3 rd = normalize(pFar - pNear);
+
+    int v = uVesselIdx;
+    vec3 vBase = uVessels[v].xyz;
+    float vH = uVessels[v].w;
+    float vR = (v == 0) ? 0.575 : ((v == 1) ? 0.295 : 0.275);
+
+    vec2 tCyl = intersectCylinder(ro, rd, vBase, vR, vH + 0.018);
+    if (tCyl.x >= tCyl.y || tCyl.y <= 0.0) discard;
+
+    // March primary ray to outer glass surface
+    float t = max(tCyl.x, 0.05);
+    float tPrev = t;
+    bool hit = false;
+    for (int s = 0; s < 42; s++) {
+      vec3 lp = (ro + rd * t) - vBase;
+      float dg = sdVesselGlass(v, lp);
+      if (dg <= 0.0006) {
+        // 5 bisection steps for crisp pixel-art glass silhouette and facet edges!
+        float tA = tPrev, tB = t;
+        for (int b = 0; b < 5; b++) {
+          float tM = 0.5 * (tA + tB);
+          if (sdVesselGlass(v, (ro + rd * tM) - vBase) > 0.0006) tA = tM; else tB = tM;
+        }
+        t = 0.5 * (tA + tB);
+        hit = true;
+        break;
+      }
+      tPrev = t;
+      t += clamp(dg * 0.72, 0.003, 0.025);
+      if (t > tCyl.y) break;
+    }
+    if (!hit) discard;
+
+    vec3 hitWorld = ro + rd * t;
+    vec4 hitView = uView * vec4(hitWorld, 1.0);
+    float hitLinearDepth = -hitView.z;
+
+    // Check foreground splat occlusion (candles, brass holders, bread, grapes in front of glass)
+    ivec2 pix = ivec2(gl_FragCoord.xy);
+    float splatDepth = texelFetch(uSplatDepthTex, pix, 0).r;
+    if (splatDepth > 0.1 && splatDepth < hitLinearDepth - 0.02) discard;
+
+    vec3 entryLocal = hitWorld - vBase;
+    vec3 N = glassNormal(v, entryLocal);
+    if (dot(rd, N) > 0.0) N = -N;
+
+    // Detect sharp crystal facet ridges & glass rims via normal curvature for specular star glints!
+    vec3 Ndx = glassNormal(v, entryLocal + vec3(0.005, 0.0, 0.0));
+    vec3 Ndy = glassNormal(v, entryLocal + vec3(0.0, 0.005, 0.0));
+    float curvature = clamp((length(Ndx - N) + length(Ndy - N)) * 6.5, 0.0, 2.2);
+    float rimProx = smoothstep(vH - 0.035, vH - 0.005, entryLocal.y);
+    float glintFactor = 0.35 + 1.85 * max(curvature, rimProx);
+
+    // Primary outer Fresnel reflection (limb-adaptive width ensures crisp dancing reflections of all 3 lit flames!)
+    float cosI = clamp(-dot(rd, N), 0.0, 1.0);
+    float F0 = fresnelExact(cosI, 1.0 / 1.52);
+    vec3 reflDir = reflect(rd, N);
+    float limbSharp = mix(1.30, 3.10, pow(1.0 - cosI, 2.0));
+    vec3 outerRefl = evalReflectedEnv(hitWorld, reflDir, glintFactor, limbSharp);
+
+    // Subtle cool Caravaggio rim grazing light so silhouette reads against dark room
+    float rimGrazing = pow(1.0 - cosI, 4.0);
+    vec3 coolRim = vec3(0.035, 0.042, 0.062) * rimGrazing;
+
+    // Trace dispersed R (1.51), G (1.52), B (1.535) channels through glass & wine!
+    float rCh = traceDispersedChannel(v, entryLocal, N, rd, 0, hitLinearDepth);
+    float gCh = traceDispersedChannel(v, entryLocal, N, rd, 1, hitLinearDepth);
+    float bCh = traceDispersedChannel(v, entryLocal, N, rd, 2, hitLinearDepth);
+
+    vec3 refractedRGB = vec3(rCh, gCh, bCh);
+    vec3 finalCol = refractedRGB * (1.0 - F0) + outerRefl * (F0 + 0.035) + coolRim;
+
+    // Extra pinpoint facet/rim glint stars from lit flames
+    for (int i = 0; i < 3; i++) {
+      if (uFlameLit[i] < 0.01) continue;
+      vec3 L = normalize(uLightPos[i] - hitWorld);
+      vec3 Hvec = normalize(L - rd);
+      float spec = pow(max(dot(N, Hvec), 0.0), 220.0) * glintFactor;
+      finalCol += uLightCol[i] * spec * 1.85;
+    }
+
+    fragColor = vec4(finalCol, 1.0);
+  }`;
+
+  // =========================================================================
+  // 11. PASS 5 & 6 & 7 SHADERS: 640x360 BLOOM, 48-COLOR PALETTE + 4x4 DITHER, UPSCALE
+  // =========================================================================
+  const BLOOM_EXTRACT_FS = `#version 300 es
+  precision highp float;
+  in vec2 vUV;
+  uniform sampler2D uHdrTex;
+  out vec4 fragColor;
+  void main() {
+    vec3 c = texture(uHdrTex, vUV).rgb;
+    float lum = max(c.r, max(c.g, c.b));
+    // Extract bright flame cores, specular facet/rim glints, and hottest focal caustic cores
+    float knee = smoothstep(0.92, 2.4, lum);
+    vec3 bright = c * knee * 0.55;
+    fragColor = vec4(min(bright, vec3(8.0)), 1.0);
+  }`;
+
+  const BLOOM_BLUR_FS = `#version 300 es
+  precision highp float;
+  in vec2 vUV;
+  uniform sampler2D uTex;
+  uniform vec2 uDir; // (1/640, 0) or (0, 1/360) * radius
+  out vec4 fragColor;
+  void main() {
+    const float W[5] = float[5](0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);
+    vec3 sum = texture(uTex, vUV).rgb * W[0];
+    for (int i = 1; i < 5; i++) {
+      vec2 off = uDir * float(i) * 1.45;
+      sum += texture(uTex, vUV + off).rgb * W[i];
+      sum += texture(uTex, vUV - off).rgb * W[i];
+    }
+    fragColor = vec4(sum, 1.0);
+  }`;
+
+  // Palette quantization + light 4x4 Bayer ordered dither at 640x360!
+  const PALETTE_DITHER_FS = `#version 300 es
+  precision highp float;
+  precision highp int;
+
+  in vec2 vUV;
+  uniform sampler2D uHdrTex;
+  uniform sampler2D uBloomFineTex;
+  uniform sampler2D uBloomWideTex;
+  uniform vec3 uPalette[48];    // sRGB [0..1] 48 procedural Caravaggio colours
+  uniform vec3 uPaletteLab[48]; // Precomputed Oklab coordinates for fast 60fps lookup!
+
+  out vec4 fragColor;
+
+  // Classic 4x4 Bayer matrix normalized to [-0.5, +0.5]
+  float bayer4x4(ivec2 p) {
+    int x = p.x & 3;
+    int y = p.y & 3;
+    int idx = y * 4 + x;
+    const int M[16] = int[16](
+       0,  8,  2, 10,
+      12,  4, 14,  6,
+       3, 11,  1,  9,
+      15,  7, 13,  5
+    );
+    return (float(M[idx]) + 0.5) / 16.0 - 0.5;
+  }
+
+  // Perceptual Oklab conversion so nearest-palette matching preserves ruby, plum, slate & gold ramps!
+  vec3 srgbToLinear(vec3 c) {
+    return pow(max(c, vec3(0.0)), vec3(2.2));
+  }
+  vec3 linearToOklab(vec3 c) {
+    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+    float l_ = pow(max(l, 1e-6), 0.3333333);
+    float m_ = pow(max(m, 1e-6), 0.3333333);
+    float s_ = pow(max(s, 1e-6), 0.3333333);
+    return vec3(
+      0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+      1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+      0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    );
+  }
+
+  // Filmic Caravaggio tone curve: strong chiaroscuro, rich shadows above #100b11, white reserved for flame cores!
+  vec3 toneMapCaravaggio(vec3 hdr) {
+    // Subtle vignette toward far room corners
+    vec2 vc = vUV * 2.0 - 1.0;
+    float vig = 1.0 - 0.18 * dot(vc * vec2(0.85, 1.0), vc * vec2(0.85, 1.0));
+    vec3 x = max(hdr * vig, vec3(0.0));
+
+    // Preserve deep shadows above near-black plum/slate floor while compressing highlights smoothly
+    float peak = max(x.r, max(x.g, x.b));
+    vec3 mapped = (x * (1.18 * x + 0.045)) / (x * (1.12 * x + 0.82) + 0.095);
+    // Only incandescent flame cores (peak > 2.6) reach the #fff8e7 flame-core white!
+    float coreAllow = smoothstep(2.3, 4.2, peak);
+    mapped = mix(min(mapped, vec3(0.92)), mapped, coreAllow);
+
+    // Lift absolute shadow floor slightly so scene is NEVER pure black
+    mapped = max(mapped, vec3(0.0028, 0.0018, 0.0034));
+    return pow(clamp(mapped, 0.0, 1.0), vec3(1.0 / 2.2));
+  }
+
+  void main() {
+    ivec2 pix = ivec2(gl_FragCoord.xy);
+    vec3 hdr = texture(uHdrTex, vUV).rgb;
+
+    // Add tiny 1-2px cross star flare on sharpest facet/rim glints + soft warm flame halo!
+    vec2 pxStep = vec2(1.0 / 640.0, 1.0 / 360.0);
+    vec3 glintStar = (
+      texture(uBloomFineTex, vUV + vec2(pxStep.x * 2.0, 0.0)).rgb +
+      texture(uBloomFineTex, vUV - vec2(pxStep.x * 2.0, 0.0)).rgb +
+      texture(uBloomFineTex, vUV + vec2(0.0, pxStep.y * 2.0)).rgb +
+      texture(uBloomFineTex, vUV - vec2(0.0, pxStep.y * 2.0)).rgb
+    ) * 0.14;
+    vec3 bloom = texture(uBloomFineTex, vUV).rgb * 0.42 + texture(uBloomWideTex, vUV).rgb * 0.52 + glintStar;
+
+    vec3 srgb = toneMapCaravaggio(hdr + bloom);
+    vec3 lin = srgbToLinear(srgb);
+    vec3 lab = linearToOklab(lin);
+
+    // Light 4x4 ordered Bayer dither in Oklab lightness & subtle chroma so gradients survive as crisp dithered bands!
+    float b = bayer4x4(pix);
+    float ditherAmp = mix(0.018, 0.034, smoothstep(0.08, 0.45, lab.x));
+    vec3 ditheredLab = lab + vec3(b * ditherAmp, b * ditherAmp * 0.18, b * ditherAmp * 0.14);
+
+    // Snap strictly to nearest of the 48 procedural Caravaggio palette colours!
+    int bestIdx = 0;
+    float bestDist = 1e9;
+    for (int i = 0; i < 48; i++) {
+      vec3 diff = ditheredLab - uPaletteLab[i];
+      // Weight lightness & hue cleanly so wine reds, brass golds, and plum/slate shadows stay distinct
+      float d2 = diff.x * diff.x * 1.15 + diff.y * diff.y * 1.35 + diff.z * diff.z * 1.35;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestIdx = i;
+      }
+    }
+
+    fragColor = vec4(uPalette[bestIdx], 1.0);
+  }`;
+
+  const UPSCALE_FS = `#version 300 es
+  precision highp float;
+  in vec2 vUV;
+  uniform sampler2D uPalettedTex;
+  out vec4 fragColor;
+  void main() {
+    fragColor = texture(uPalettedTex, vUV);
+  }`;
+
+  // =========================================================================
+  // 12. COMPILE PROGRAMS, ALLOCATE TEXTURES, FBOS & VAOS
+  // =========================================================================
+  const progShadowSplat   = createProgram(SHADOW_SPLAT_VS, SHADOW_SPLAT_FS);
+  const progShadowGlass   = createProgram(QUAD_VS, SHADOW_GLASS_FS);
+  const progSplatDepth    = createProgram(SPLAT_COMMON_VS, SPLAT_DEPTH_FS);
+  const progSplatColor    = createProgram(SPLAT_COMMON_VS, SPLAT_COLOR_FS);
+  const progPhotonCaustic = createProgram(PHOTON_CAUSTIC_VS, PHOTON_CAUSTIC_FS);
+  const progCausticAccum  = createProgram(QUAD_VS, CAUSTIC_ACCUM_FS);
+  const progSceneCombine  = createProgram(QUAD_VS, SCENE_COMBINE_FS);
+  const progGlass         = createProgram(GLASS_BOUNDS_VS, GLASS_FS);
+  const progBloomExtract  = createProgram(QUAD_VS, BLOOM_EXTRACT_FS);
+  const progBloomBlur     = createProgram(QUAD_VS, BLOOM_BLUR_FS);
+  const progPaletteDither = createProgram(QUAD_VS, PALETTE_DITHER_FS);
+  const progUpscale       = createProgram(QUAD_VS, UPSCALE_FS);
+
+  function getUniforms(prog, names) {
+    const map = {};
+    for (const n of names) map[n] = gl.getUniformLocation(prog, n);
+    return map;
+  }
+
+  const uShadowSplat = getUniforms(progShadowSplat, ['uSplatTex', 'uCandlePos[0]', 'uLightPos', 'uHemiSign']);
+  const uShadowGlass = getUniforms(progShadowGlass, ['uLightPos', 'uHemiSign', 'uVessels[0]', 'uWineLevels', 'uWineSlosh', 'uTime']);
+  const uSplatDepth  = getUniforms(progSplatDepth, [
+    'uSplatTex', 'uView', 'uFocalPx', 'uScreenSnap', 'uCandlePos[0]', 'uWickPos[0]',
+    'uFlameLean[0]', 'uFlameLit', 'uPuffState[0]', 'uDraughtVec', 'uTime'
+  ]);
+  const uSplatColor  = getUniforms(progSplatColor, [
+    'uSplatTex', 'uView', 'uFocalPx', 'uScreenSnap', 'uCandlePos[0]', 'uWickPos[0]',
+    'uFlameLean[0]', 'uFlameLit', 'uPuffState[0]', 'uDraughtVec', 'uTime',
+    'uShadowTex', 'uShadowDepth', 'uCamPos', 'uLightPos[0]', 'uLightCol[0]', 'uFlameSize'
+  ]);
+  const uPhoton = getUniforms(progPhotonCaustic, [
+    'uViewProj', 'uScreenSnap', 'uLightPos[0]', 'uLightCol[0]', 'uFlameLit', 'uFrameSeed',
+    'uVessels[0]', 'uWineLevels', 'uWineSlosh', 'uTime', 'uSplatDepthTex'
+  ]);
+  const uCausticAccum = getUniforms(progCausticAccum, ['uCausticNew', 'uCausticPrev', 'uBlendAlpha']);
+  const uSceneCombine = getUniforms(progSceneCombine, ['uSplatColorTex', 'uCausticTex']);
+  const uGlass = getUniforms(progGlass, [
+    'uBoundsUV', 'uSceneTex', 'uSplatDepthTex', 'uInvViewProj', 'uViewProj', 'uView',
+    'uScreenSnap', 'uCamPos', 'uVesselIdx', 'uWickPos[0]', 'uFlameLean[0]',
+    'uLightPos[0]', 'uLightCol[0]', 'uFlameLit', 'uVessels[0]', 'uWineLevels', 'uWineSlosh', 'uTime'
+  ]);
+  const uBloomExtract  = getUniforms(progBloomExtract, ['uHdrTex']);
+  const uBloomBlur     = getUniforms(progBloomBlur, ['uTex', 'uDir']);
+  const uPaletteDither = getUniforms(progPaletteDither, ['uHdrTex', 'uBloomFineTex', 'uBloomWideTex', 'uPalette[0]', 'uPaletteLab[0]']);
+  const uUpscale       = getUniforms(progUpscale, ['uPalettedTex']);
+
+  // Precompute Oklab coordinates for the 48-colour palette once on CPU
+  const PALETTE_LAB_48 = new Float32Array(48 * 3);
+  for (let i = 0; i < 48; i++) {
+    const r = Math.pow(PALETTE_48[i * 3 + 0], 2.2);
+    const g = Math.pow(PALETTE_48[i * 3 + 1], 2.2);
+    const b = Math.pow(PALETTE_48[i * 3 + 2], 2.2);
+    const l = Math.cbrt(Math.max(1e-6, 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b));
+    const m = Math.cbrt(Math.max(1e-6, 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b));
+    const s = Math.cbrt(Math.max(1e-6, 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b));
+    PALETTE_LAB_48[i * 3 + 0] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+    PALETTE_LAB_48[i * 3 + 1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    PALETTE_LAB_48[i * 3 + 2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  }
+
+  gl.useProgram(progPaletteDither);
+  gl.uniform3fv(uPaletteDither['uPalette[0]'], PALETTE_48);
+  gl.uniform3fv(uPaletteDither['uPaletteLab[0]'], PALETTE_LAB_48);
+
+  // Upload 3D Gaussian Splat Data Texture (1280 x 256 RGBA32F)
+  const splatTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, splatTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, TEX_SPLAT_W, TEX_SPLAT_H, 0, gl.RGBA, gl.FLOAT, splatTexData);
+
+  // Geometry VAOs
+  const emptyVAO = gl.createVertexArray();
+
+  const quadCornersBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadCornersBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1,   1, -1,   1,  1,
+    -1, -1,   1,  1,  -1,  1
+  ]), gl.STATIC_DRAW);
+
+  const sortedIndexBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, sortedIndexBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, sortedIndicesGPU, gl.DYNAMIC_DRAW);
+
+  const splatVAO = gl.createVertexArray();
+  gl.bindVertexArray(splatVAO);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadCornersBuf);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, sortedIndexBuf);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribIPointer(1, 1, gl.UNSIGNED_INT, 0, 0);
+  gl.vertexAttribDivisor(1, 1);
+
+  const shadowIndexArr = new Uint32Array(shadowCasterIndices);
+  const shadowIndexBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, shadowIndexBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, shadowIndexArr, gl.STATIC_DRAW);
+
+  const shadowSplatVAO = gl.createVertexArray();
+  gl.bindVertexArray(shadowSplatVAO);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadCornersBuf);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, shadowIndexBuf);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribIPointer(1, 1, gl.UNSIGNED_INT, 0, 0);
+  gl.vertexAttribDivisor(1, 1);
+  gl.bindVertexArray(null);
+
+  // Framebuffer helper
+  function makeColorFBO(w, h, internalFormat, format, type, filter, withDepthRBO) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
+
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+
+    if (withDepthRBO) {
+      const rbo = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rbo);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { fbo, tex, w, h };
+  }
+
+  // Dual-paraboloid Shadow Atlas FBO (1536 x 1024): RGBA16F glass transmittance + DEPTH_COMPONENT24 texture
+  const shadowColorTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, shadowColorTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, SHADOW_ATLAS_W, SHADOW_ATLAS_H, 0, gl.RGBA, gl.HALF_FLOAT, null);
+
+  const shadowDepthTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, shadowDepthTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, SHADOW_ATLAS_W, SHADOW_ATLAS_H, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+
+  const fboShadow = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboShadow);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, shadowColorTex, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, shadowDepthTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // 640x360 Render Targets
+  const rtSplatDepth   = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.NEAREST, true);
+  const rtSplatColor   = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  const rtCausticRaw   = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  let   rtCausticRead  = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  let   rtCausticWrite = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  let   rtSceneA       = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  let   rtSceneB       = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  const rtBloomExtract = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  const rtBloomTemp    = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  const rtBloomFine    = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  const rtBloomWideTmp = makeColorFBO(320, 180, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  const rtBloomWide    = makeColorFBO(320, 180, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false);
+  const rtPaletted     = makeColorFBO(TARGET_W, TARGET_H, gl.RGBA8,   gl.RGBA, gl.UNSIGNED_BYTE, gl.NEAREST, false);
+
+  // Clear temporal caustic buffers on startup
+  for (const rt of [rtCausticRead, rtCausticWrite]) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fbo);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // =========================================================================
+  // 13. CAMERA MATRICES, PIXEL-SNAPPED BREATHING DRIFT & SYNCHRONOUS INIT SORT
+  // =========================================================================
+  // Low 3/4 view slightly above table height: decanter just left of centre,
+  // glasses beside it, candles behind & to the side so caustics spread forward!
+  const BASE_CAM_EYE    = [0.22, 1.46, 4.38];
+  const BASE_CAM_TARGET = [-0.08, 0.56, -0.14];
+  const CAM_FOV_Y       = 31.5 * Math.PI / 180.0;
+  const FOCAL_PY        = TARGET_H / (2.0 * Math.tan(CAM_FOV_Y * 0.5));
+  const FOCAL_PX        = FOCAL_PY;
+
+  function mat4LookAt(out, eye, center, up) {
+    let zx = eye[0] - center[0], zy = eye[1] - center[1], zz = eye[2] - center[2];
+    let zLen = Math.hypot(zx, zy, zz) || 1;
+    zx /= zLen; zy /= zLen; zz /= zLen;
+    let xx = up[1] * zz - up[2] * zy;
+    let xy = up[2] * zx - up[0] * zz;
+    let xz = up[0] * zy - up[1] * zx;
+    let xLen = Math.hypot(xx, xy, xz) || 1;
+    xx /= xLen; xy /= xLen; xz /= xLen;
+    const yx = zy * xz - zz * xy;
+    const yy = zz * xx - zx * xz;
+    const yz = zx * xy - zy * xx;
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+
+  function mat4Perspective(out, fovy, aspect, near, far) {
+    const f = 1.0 / Math.tan(fovy * 0.5);
+    const nf = 1.0 / (near - far);
+    out.fill(0);
+    out[0] = f / aspect;
+    out[5] = f;
+    out[10] = (far + near) * nf;
+    out[11] = -1;
+    out[14] = (2 * far * near) * nf;
+    return out;
+  }
+
+  function mat4Mul(out, a, b) {
+    for (let c = 0; c < 4; c++) {
+      const b0 = b[c * 4], b1 = b[c * 4 + 1], b2 = b[c * 4 + 2], b3 = b[c * 4 + 3];
+      out[c * 4 + 0] = a[0] * b0 + a[4] * b1 + a[8]  * b2 + a[12] * b3;
+      out[c * 4 + 1] = a[1] * b0 + a[5] * b1 + a[9]  * b2 + a[13] * b3;
+      out[c * 4 + 2] = a[2] * b0 + a[6] * b1 + a[10] * b2 + a[14] * b3;
+      out[c * 4 + 3] = a[3] * b0 + a[7] * b1 + a[11] * b2 + a[15] * b3;
+    }
+    return out;
+  }
+
+  function mat4Invert(out, m) {
+    const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+    const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+    const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+    const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+    const b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10;
+    const b03 = a01 * a12 - a02 * a11, b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;
+    const b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30, b08 = a20 * a33 - a23 * a30;
+    const b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;
+    let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+    if (!det) return out;
+    det = 1.0 / det;
+    out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+    out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+    out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+    out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+    out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+    out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+    out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+    out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+    out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+    out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+    out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+    out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+    out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
+    out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+    out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
+    out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+    return out;
+  }
+
+  const mView        = new Float32Array(16);
+  const mProj        = new Float32Array(16);
+  const mViewProj    = new Float32Array(16);
+  const mInvViewProj = new Float32Array(16);
+  const camEye       = Float32Array.from(BASE_CAM_EYE);
+  const screenSnap   = new Float32Array([0, 0]);
+
+  mat4Perspective(mProj, CAM_FOV_Y, TARGET_W / TARGET_H, 0.25, 15.0);
+  mat4LookAt(mView, camEye, BASE_CAM_TARGET, [0, 1, 0]);
+  mat4Mul(mViewProj, mProj, mView);
+  mat4Invert(mInvViewProj, mViewProj);
+
+  // Perform synchronous initial radix sort for Frame 0 so the very first frame is 100% sorted!
+  (function initialSyncSort() {
+    const rz0 = mView[2], rz1 = mView[6], rz2 = mView[10], rz3 = mView[14];
+    const tmpDepth = new Float32Array(splatCount);
+    for (let i = 0; i < splatCount; i++) {
+      const b = i * 4;
+      let x = sortMetaData[b], y = sortMetaData[b + 1], z = sortMetaData[b + 2];
+      const objId = sortMetaData[b + 3] | 0;
+      if (objId >= 1 && objId <= 3) {
+        const c = candles[objId - 1];
+        x += c.x; y += c.y; z += c.z;
+      } else if (objId >= 4 && objId <= 9) {
+        const c = candles[(objId - 4) % 3];
+        x += c.x; y += c.y + c.wickH; z += c.z;
+      }
+      tmpDepth[i] = -(rz0 * x + rz1 * y + rz2 * z + rz3);
+      sortedIndicesGPU[i] = i;
+    }
+    sortedIndicesGPU.sort((a, b) => tmpDepth[b] - tmpDepth[a]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, sortedIndexBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, sortedIndicesGPU);
+  })();
+
+  // =========================================================================
+  // 14. WINE POURING STATE, DRAUGHT, FLAME FLICKER & INTERACTION HANDLERS
+  // =========================================================================
+  // Pouring state: pourRatio in [0, 1] transfers wine smoothly between Decanter & Half-Full Glass 1
+  let targetPourRatio = 0.48; // default: rich decanter belly + half-full glass!
+  let currentPourRatio = 0.48;
+  let pourVel = 0.0;
+  let sloshX = 0.0, sloshZ = 0.0, sloshVX = 0.0, sloshVZ = 0.0;
+
+  let draughtStartTime = -100.0;
+  let lastAutoDraughtTime = 0.0;
+  let lastInputTime = performance.now() * 0.001;
+  let showcaseActive = false;
+  let showcasePhase = 0.0;
+
+  // Viewport letterbox rect in CSS pixels for accurate mouse picking & integer NearestFilter upscale
+  let viewRect = { x: 0, y: 0, w: TARGET_W, h: TARGET_H, physX: 0, physY: 0, physW: TARGET_W, physH: TARGET_H, scale: 1 };
+
+  function updateCanvasSizing() {
+    const dpr = window.devicePixelRatio || 1;
+    const physW = Math.max(TARGET_W, Math.round(window.innerWidth * dpr));
+    const physH = Math.max(TARGET_H, Math.round(window.innerHeight * dpr));
+    if (canvas.width !== physW || canvas.height !== physH) {
+      canvas.width = physW;
+      canvas.height = physH;
+    }
+    // Integer NearestFilter upscale (x3 on 1080p+, exact integer scale everywhere, letterbox the rest)
+    const intScale = Math.max(1, Math.floor(Math.min(physW / TARGET_W, physH / TARGET_H)));
+    const drawPhysW = TARGET_W * intScale;
+    const drawPhysH = TARGET_H * intScale;
+    const offPhysX = Math.floor((physW - drawPhysW) * 0.5);
+    const offPhysY = Math.floor((physH - drawPhysH) * 0.5);
+    viewRect = {
+      physX: offPhysX, physY: offPhysY, physW: drawPhysW, physH: drawPhysH, scale: intScale,
+      x: offPhysX / dpr, y: offPhysY / dpr, w: drawPhysW / dpr, h: drawPhysH / dpr
+    };
+  }
+  window.addEventListener('resize', updateCanvasSizing);
+  updateCanvasSizing();
+
+  // Unproject pointer CSS coordinates to 3D world ray (clamps when allowOutOfBounds=true during active drag)
+  function screenToWorldRay(clientX, clientY, allowOutOfBounds = false) {
+    let u = (clientX - viewRect.x) / Math.max(viewRect.w, 1);
+    let v = 1.0 - (clientY - viewRect.y) / Math.max(viewRect.h, 1);
+    if (!allowOutOfBounds && (u < 0 || u > 1 || v < 0 || v > 1)) return null;
+    u = clamp(u, -0.15, 1.15);
+    v = clamp(v, -0.15, 1.15);
+    const ndcX = (u * 2.0 - 1.0) - screenSnap[0];
+    const ndcY = (v * 2.0 - 1.0) - screenSnap[1];
+
+    function unproj(nz) {
+      const m = mInvViewProj;
+      const w = m[3] * ndcX + m[7] * ndcY + m[11] * nz + m[15];
+      return [
+        (m[0] * ndcX + m[4] * ndcY + m[8]  * nz + m[12]) / w,
+        (m[1] * ndcX + m[5] * ndcY + m[9]  * nz + m[13]) / w,
+        (m[2] * ndcX + m[6] * ndcY + m[10] * nz + m[14]) / w
+      ];
+    }
+    const pN = unproj(-1.0);
+    const pF = unproj(1.0);
+    let dx = pF[0] - pN[0], dy = pF[1] - pN[1], dz = pF[2] - pN[2];
+    const len = Math.hypot(dx, dy, dz) || 1;
+    return { ro: [camEye[0], camEye[1], camEye[2]], rd: [dx / len, dy / len, dz / len] };
+  }
+
+  function raySphereDist(ro, rd, cx, cy, cz, rad) {
+    const ocx = ro[0] - cx, ocy = ro[1] - cy, ocz = ro[2] - cz;
+    const b = ocx * rd[0] + ocy * rd[1] + ocz * rd[2];
+    const c = ocx * ocx + ocy * ocy + ocz * ocz - rad * rad;
+    const disc = b * b - c;
+    if (disc < 0) return -1;
+    const t = -b - Math.sqrt(disc);
+    return t > 0 ? t : -1;
+  }
+
+  function rayCylinderDist(ro, rd, cx, y0, cz, rad, h) {
+    const ocx = ro[0] - cx, ocz = ro[2] - cz;
+    const a = rd[0] * rd[0] + rd[2] * rd[2];
+    const b = ocx * rd[0] + ocz * rd[2];
+    const c = ocx * ocx + ocz * ocz - rad * rad;
+    if (a < 1e-6) return -1;
+    const disc = b * b - a * c;
+    if (disc < 0) return -1;
+    const s = Math.sqrt(disc);
+    let t0 = (-b - s) / a, t1 = (-b + s) / a;
+    const yAt0 = ro[1] + rd[1] * t0;
+    if (t0 > 0 && yAt0 >= y0 && yAt0 <= y0 + h) return t0;
+    if (Math.abs(rd[1]) > 1e-5) {
+      const tTop = (y0 + h - ro[1]) / rd[1];
+      if (tTop > 0 && tTop >= t0 && tTop <= t1) return tTop;
+    }
+    return -1;
+  }
+
+  function refract3D(rd, nx, ny, nz, eta) {
+    const dotNI = rd[0] * nx + rd[1] * ny + rd[2] * nz;
+    const k = 1.0 - eta * eta * (1.0 - dotNI * dotNI);
+    if (k < 0.0) return null;
+    const s = eta * dotNI + Math.sqrt(k);
+    const rx = eta * rd[0] - s * nx;
+    const ry = eta * rd[1] - s * ny;
+    const rz = eta * rd[2] - s * nz;
+    const len = Math.hypot(rx, ry, rz) || 1;
+    return [rx / len, ry / len, rz / len];
+  }
+
+  function testCandlesAlongRay(ro, rd, radScale) {
+    let bestT = 1e9;
+    let hit = null;
+    for (let i = 0; i < 3; i++) {
+      const c = candles[i];
+      const flameX = c.x + c.leanX * 0.6;
+      const flameY = c.y + c.wickH + 0.10;
+      const flameZ = c.z + c.leanZ * 0.6;
+
+      // Tight flame-tip sphere for click-to-blow-out cursor hint, plus generous body cylinder
+      const tFlameTight = raySphereDist(ro, rd, flameX, flameY, flameZ, 0.21 * radScale);
+      const bodyR = Math.max(c.baseR * 1.26, 0.28) * radScale;
+      const tBody = rayCylinderDist(ro, rd, c.x, c.y - 0.05, c.z, bodyR, c.wickH + 0.24);
+
+      if (tFlameTight > 0 && tFlameTight < bestT) {
+        bestT = tFlameTight;
+        hit = { type: 'candle', idx: i, onFlame: true, t: tFlameTight };
+      }
+      if (tBody > 0 && tBody < bestT) {
+        bestT = tBody;
+        const hitY = ro[1] + rd[1] * tBody;
+        hit = { type: 'candle', idx: i, onFlame: (hitY > c.y + c.wickH - 0.10), t: tBody };
+      }
+    }
+    return hit;
+  }
+
+  // Pick any candle even when directly behind the decanter, wine glasses, bread, or grapes!
+  // Tests BOTH direct X-ray line-of-sight AND the optically refracted ray through glass & wine!
+  const PICK_VESSELS = [DECANTER, GLASS1, GLASS2];
+  function pickCandleThroughGlass(ray) {
+    if (!ray) return null;
+
+    // 1. Direct X-ray test through all glassware & props (never blocked by decanter or glasses!)
+    const directHit = testCandlesAlongRay(ray.ro, ray.rd, 1.0);
+    if (directHit) return directHit;
+
+    // 2. Optical refraction test: if cursor points through the decanter or a wine glass,
+    // trace the bent ray through the cylindrical glass/wine lens so clicking the refracted image grabs the candle too!
+    for (let vIdx = 0; vIdx < 3; vIdx++) {
+      const v = PICK_VESSELS[vIdx];
+      const ocx = ray.ro[0] - v.x, ocz = ray.ro[2] - v.z;
+      const a = ray.rd[0] * ray.rd[0] + ray.rd[2] * ray.rd[2];
+      const b = ocx * ray.rd[0] + ocz * ray.rd[2];
+      const c = ocx * ocx + ocz * ocz - (v.rMax * v.rMax);
+      const disc = b * b - a * c;
+      if (a > 1e-6 && disc > 0) {
+        const s = Math.sqrt(disc);
+        const tEnter = (-b - s) / a;
+        const yEnter = ray.ro[1] + ray.rd[1] * tEnter;
+        if (tEnter > 0 && yEnter >= v.y && yEnter <= v.y + v.h) {
+          const ex = ray.ro[0] + ray.rd[0] * tEnter;
+          const ez = ray.ro[2] + ray.rd[2] * tEnter;
+          let nx = (ex - v.x) / v.rMax, nz = (ez - v.z) / v.rMax;
+          const nLen = Math.hypot(nx, nz) || 1;
+          nx /= nLen; nz /= nLen;
+
+          // Effective refractive index: ~1.38 through wine-filled belly/bowl, ~1.08 through hollow upper glass
+          const inWine = (yEnter - v.y) <= (uWineLevelsVec[vIdx] + 0.04);
+          const nEff = inWine ? 1.38 : 1.08;
+          const rdInside = refract3D(ray.rd, nx, 0, nz, 1.0 / nEff);
+          if (rdInside) {
+            // Intersect inside ray with back wall of cylinder
+            const icx = ex - v.x, icz = ez - v.z;
+            const ia = rdInside[0] * rdInside[0] + rdInside[2] * rdInside[2];
+            const ib = icx * rdInside[0] + icz * rdInside[2];
+            const tSpan = ia > 1e-6 ? Math.max(0.05, (-2.0 * ib) / ia) : 0.2;
+            const ox = ex + rdInside[0] * tSpan;
+            const oy = yEnter + rdInside[1] * tSpan;
+            const oz = ez + rdInside[2] * tSpan;
+            let onx = (v.x - ox) / v.rMax, onz = (v.z - oz) / v.rMax;
+            const onLen = Math.hypot(onx, onz) || 1;
+            onx /= onLen; onz /= onLen;
+
+            const rdOut = refract3D(rdInside, onx, 0, onz, nEff);
+            if (rdOut) {
+              const refrHit = testCandlesAlongRay([ox, oy, oz], rdOut, 1.18);
+              if (refrHit) return refrHit;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Generous wide-halo fallback for candles tucked behind wide bases/obstacles
+    return testCandlesAlongRay(ray.ro, ray.rd, 1.32);
+  }
+
+  function isRayOverPourZone(ray) {
+    if (!ray) return false;
+    return (
+      rayCylinderDist(ray.ro, ray.rd, DECANTER.x, DECANTER.y, DECANTER.z, DECANTER.rMax * 1.12, DECANTER.h + 0.05) > 0 ||
+      rayCylinderDist(ray.ro, ray.rd, GLASS1.x, GLASS1.y, GLASS1.z, GLASS1.rMax * 1.20, GLASS1.h + 0.05) > 0
+    );
+  }
+
+  // Smooth collision resolution so dragged or showcase candles stay on the table and glide around objects!
+  const STATIC_OBSTACLES = [
+    { x: DECANTER.x, z: DECANTER.z, r: DECANTER.colR },
+    { x: GLASS1.x,   z: GLASS1.z,   r: GLASS1.colR },
+    { x: GLASS2.x,   z: GLASS2.z,   r: GLASS2.colR },
+    { x: BREAD.x,    z: BREAD.z,    r: BREAD.colR },
+    { x: GRAPES.x,   z: GRAPES.z,   r: GRAPES.colR },
+    { x: NAPKIN.x,   z: NAPKIN.z,   r: NAPKIN.colR }
+  ];
+
+  function resolveCandlePosition(cIdx, nx, nz) {
+    const c = candles[cIdx];
+    nx = clamp(nx, -3.55, 3.55);
+    nz = clamp(nz, -2.30, 1.88);
+
+    for (let iter = 0; iter < 5; iter++) {
+      for (const ob of STATIC_OBSTACLES) {
+        let dx = nx - ob.x, dz = nz - ob.z;
+        let dist = Math.hypot(dx, dz);
+        const minDist = ob.r + c.baseR + 0.04;
+        if (dist < minDist) {
+          // If cursor passes dead-centre over an obstacle, slide smoothly toward the candle's current side!
+          if (dist < 0.02) {
+            dx = (c.x - ob.x) + 0.05;
+            dz = (c.z - ob.z);
+            dist = Math.hypot(dx, dz) || 1;
+          }
+          nx = ob.x + (dx / dist) * minDist;
+          nz = ob.z + (dz / dist) * minDist;
+        }
+      }
+      for (let j = 0; j < 3; j++) {
+        if (j === cIdx) continue;
+        const other = candles[j];
+        let dx = nx - other.x, dz = nz - other.z;
+        let dist = Math.hypot(dx, dz);
+        const minDist = c.baseR + other.baseR + 0.06;
+        if (dist < minDist) {
+          if (dist < 0.02) {
+            dx = (c.x - other.x) + 0.05;
+            dz = (c.z - other.z);
+            dist = Math.hypot(dx, dz) || 1;
+          }
+          nx = other.x + (dx / dist) * minDist;
+          nz = other.z + (dz / dist) * minDist;
+        }
+      }
+      nx = clamp(nx, -3.55, 3.55);
+      nz = clamp(nz, -2.30, 1.88);
+    }
+    return [nx, nz];
+  }
+
+  function intersectTablePlane(ray, planeY) {
+    if (!ray || Math.abs(ray.rd[1]) < 1e-4) return null;
+    const t = (planeY - ray.ro[1]) / ray.rd[1];
+    if (t <= 0) return null;
+    return [ray.ro[0] + ray.rd[0] * t, ray.ro[2] + ray.rd[2] * t];
+  }
+
+  function toggleCandleFlame(cIdx, nowSec) {
+    const c = candles[cIdx];
+    if (c.targetLit > 0.5) {
+      // Blow out: spawn smoke puff & fade light over 0.3s
+      c.targetLit = 0.0;
+      c.puffTime = nowSec;
+      c.puffX = c.x;
+      c.puffY = c.y + c.wickH + 0.04;
+      c.puffZ = c.z;
+    } else {
+      // Relight!
+      c.targetLit = 1.0;
+    }
+  }
+
+  // Pointer & keyboard interaction state
+  let dragState = null;
+  let hoveredCandleIdx = -1;
+  const candleHoverSmooth = new Float32Array(3);
+
+  canvas.addEventListener('pointerdown', (e) => {
+    const nowSec = performance.now() * 0.001;
+    lastInputTime = nowSec;
+    showcaseActive = false;
+
+    const ray = screenToWorldRay(e.clientX, e.clientY, false);
+    const hit = pickCandleThroughGlass(ray);
+    if (hit && hit.type === 'candle') {
+      const c = candles[hit.idx];
+      const dragPlaneY = c.y + c.wickH * 0.45;
+      const pt = intersectTablePlane(ray, dragPlaneY);
+      hoveredCandleIdx = hit.idx;
+      dragState = {
+        pointerId: e.pointerId,
+        candleIdx: hit.idx,
+        onFlame: hit.onFlame,
+        planeY: dragPlaneY,
+        startX: e.clientX,
+        startY: e.clientY,
+        moved: false,
+        grabDX: pt ? (c.x - pt[0]) : 0,
+        grabDZ: pt ? (c.z - pt[1]) : 0
+      };
+      canvas.style.cursor = 'grabbing';
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    const nowSec = performance.now() * 0.001;
+
+    if (dragState && e.pointerId === dragState.pointerId) {
+      lastInputTime = nowSec;
+      showcaseActive = false;
+      hoveredCandleIdx = dragState.candleIdx;
+      const ray = screenToWorldRay(e.clientX, e.clientY, true);
+      const distPx = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY);
+      if (distPx > 4.5) dragState.moved = true;
+
+      if (dragState.moved && ray) {
+        const c = candles[dragState.candleIdx];
+        const pt = intersectTablePlane(ray, dragState.planeY);
+        if (pt) {
+          const [nx, nz] = resolveCandlePosition(dragState.candleIdx, pt[0] + dragState.grabDX, pt[1] + dragState.grabDZ);
+          c.vx = clamp((nx - c.x) * 32.0, -8.0, 8.0);
+          c.vz = clamp((nz - c.z) * 32.0, -8.0, 8.0);
+          c.x = nx;
+          c.z = nz;
+          c.y = getTableSurfaceY(nx, nz);
+        }
+        canvas.style.cursor = 'grabbing';
+      }
+      return;
+    }
+
+    const ray = screenToWorldRay(e.clientX, e.clientY, false);
+    const candleHit = pickCandleThroughGlass(ray);
+    if (candleHit) {
+      hoveredCandleIdx = candleHit.idx;
+      canvas.style.cursor = candleHit.onFlame ? 'pointer' : 'grab';
+    } else {
+      hoveredCandleIdx = -1;
+      canvas.style.cursor = isRayOverPourZone(ray) ? 'ns-resize' : 'default';
+    }
+  });
+
+  function finishPointer(e) {
+    if (!dragState || e.pointerId !== dragState.pointerId) return;
+    const nowSec = performance.now() * 0.001;
+    lastInputTime = nowSec;
+    if (!dragState.moved) {
+      // Stationary click on flame (or unlit/lit candle) blows out or relights — works through glass too!
+      toggleCandleFlame(dragState.candleIdx, nowSec);
+    }
+    dragState = null;
+    const ray = screenToWorldRay(e.clientX, e.clientY, false);
+    const candleHit = pickCandleThroughGlass(ray);
+    hoveredCandleIdx = candleHit ? candleHit.idx : -1;
+    canvas.style.cursor = candleHit ? (candleHit.onFlame ? 'pointer' : 'grab') : 'default';
+  }
+  window.addEventListener('pointerup', finishPointer);
+  window.addEventListener('pointercancel', finishPointer);
+
+  // Wheel over decanter (or half-full glass): pour wine smoothly even if a candle sits behind it!
+  canvas.addEventListener('wheel', (e) => {
+    const ray = screenToWorldRay(e.clientX, e.clientY, false);
+    const nearDec = ray && rayCylinderDist(ray.ro, ray.rd, -0.25, 0.0, 0.05, 0.98, 1.65) > 0;
+    if (isRayOverPourZone(ray) || nearDec) {
+      e.preventDefault();
+      lastInputTime = performance.now() * 0.001;
+      showcaseActive = false;
+      const step = clamp(e.deltaY, -120, 120) * 0.0014;
+      targetPourRatio = clamp(targetPourRatio + step, 0.04, 0.96);
+      sloshVX += (step > 0 ? 1 : -1) * 0.22;
+    }
+  }, { passive: false });
+
+  // Key D: trigger 2-second draught!
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyD' || e.key === 'd' || e.key === 'D') {
+      const nowSec = performance.now() * 0.001;
+      lastInputTime = nowSec;
+      showcaseActive = false;
+      draughtStartTime = nowSec;
+    }
+  });
+
+  // =========================================================================
+  // 15. PER-FRAME PHYSICS, FLICKER, VESSEL SCREEN BOUNDS & RENDER PIPELINE
+  // =========================================================================
+  const uCandlePosFlat = new Float32Array(9);
+  const uWickPosFlat   = new Float32Array(9);
+  const uFlameLeanFlat = new Float32Array(9);
+  const uLightPosFlat  = new Float32Array(9);
+  const uLightColFlat  = new Float32Array(9);
+  const uFlameSizeVec  = new Float32Array(3);
+  const uFlameLitVec   = new Float32Array(3);
+  const uPuffFlat      = new Float32Array(12);
+  const uVesselsFlat   = new Float32Array([
+    DECANTER.x, DECANTER.y, DECANTER.z, DECANTER.h,
+    GLASS1.x,   GLASS1.y,   GLASS1.z,   GLASS1.h,
+    GLASS2.x,   GLASS2.y,   GLASS2.z,   GLASS2.h
+  ]);
+  const uWineLevelsVec = new Float32Array(3);
+  const draughtVec     = new Float32Array(2);
+
+  // Smooth layered live-fire noise (never strobing!) + rare natural gutter dip
+  function evalCandleFlicker(c, t, draughtAmt) {
+    const s = c.seed;
+    const slow = Math.sin(t * 1.85 + s) * 0.065 + Math.sin(t * 3.4 + s * 2.1) * 0.045;
+    const med  = Math.sin(t * 6.7 + s * 1.3) * 0.032 + Math.cos(t * 10.9 + s * 3.7) * 0.018;
+    // Rare gentle gutter dip every ~13 seconds (staggered per candle)
+    const gutCycle = (t * 0.076 + s * 0.29) % 1.0;
+    const gutEnv = Math.exp(-Math.pow((gutCycle - 0.5) / 0.028, 2.0));
+    const gutDip = gutEnv * (0.28 + 0.12 * Math.sin(t * 24.0 + s));
+    const draughtGutter = draughtAmt * (0.24 + 0.14 * Math.sin(t * 21.0 + s * 2.0));
+
+    const intensity = clamp(1.0 + slow + med - gutDip - draughtGutter, 0.38, 1.18);
+    const jitterX = (Math.sin(t * 4.3 + s * 1.7) * 0.008 + gutEnv * 0.022 * Math.sin(t * 17.0)) * (1.0 + draughtAmt);
+    const jitterZ = (Math.cos(t * 3.9 + s * 2.3) * 0.008 + gutEnv * 0.018 * Math.cos(t * 15.0)) * (1.0 + draughtAmt);
+    const stretch = slow * 0.9 - gutDip * 0.8 + draughtAmt * 0.75;
+    return { intensity, jitterX, jitterZ, stretch, warmthShift: gutDip + draughtAmt * 0.4 };
+  }
+
+  // Compute tight 640x360 UV bounding box [minU, minV, maxU, maxV] for vessel v
+  function computeVesselScreenBounds(vIdx) {
+    const bx = uVesselsFlat[vIdx * 4 + 0];
+    const by = uVesselsFlat[vIdx * 4 + 1];
+    const bz = uVesselsFlat[vIdx * 4 + 2];
+    const bh = uVesselsFlat[vIdx * 4 + 3] + 0.03;
+    const br = (vIdx === 0 ? 0.59 : (vIdx === 1 ? 0.31 : 0.29));
+
+    let minU = 1.0, minV = 1.0, maxU = 0.0, maxV = 0.0;
+    for (let sx = -1; sx <= 1; sx += 2) {
+      for (let sy = 0; sy <= 1; sy++) {
+        for (let sz = -1; sz <= 1; sz += 2) {
+          const wx = bx + sx * br;
+          const wy = by + sy * bh;
+          const wz = bz + sz * br;
+          const m = mViewProj;
+          const cw = m[3] * wx + m[7] * wy + m[11] * wz + m[15];
+          if (cw <= 0.1) return [0, 0, 1, 1];
+          const u = ((m[0] * wx + m[4] * wy + m[8]  * wz + m[12]) / cw + screenSnap[0]) * 0.5 + 0.5;
+          const v = ((m[1] * wx + m[5] * wy + m[9]  * wz + m[13]) / cw + screenSnap[1]) * 0.5 + 0.5;
+          if (u < minU) minU = u;
+          if (u > maxU) maxU = u;
+          if (v < minV) minV = v;
+          if (v > maxV) maxV = v;
+        }
+      }
+    }
+    const padU = 4.0 / TARGET_W, padV = 4.0 / TARGET_H;
+    return [
+      clamp(minU - padU, 0, 1),
+      clamp(minV - padV, 0, 1),
+      clamp(maxU + padU, 0, 1),
+      clamp(maxV + padV, 0, 1)
+    ];
+  }
+
+  let prevTime = performance.now() * 0.001;
+  let frameCounter = 0;
+  let fpsSmooth = 60.0;
+  let programmaticOverride = false;
+
+  function updateSimulation(nowSec, dt) {
+    // 1. Slow ±0.5 deg camera breathing drift, strictly snapped to 640x360 pixel grid so zero shimmer!
+    const maxShiftNDCX = Math.tan(0.45 * Math.PI / 180.0) / Math.tan(CAM_FOV_Y * 0.5 * (TARGET_W / TARGET_H)) * 2.0;
+    const maxShiftNDCY = Math.tan(0.35 * Math.PI / 180.0) / Math.tan(CAM_FOV_Y * 0.5) * 2.0;
+    const rawShiftX = Math.sin(nowSec * 0.29) * maxShiftNDCX;
+    const rawShiftY = Math.cos(nowSec * 0.21) * maxShiftNDCY;
+    // Pixel step in NDC is 2.0 / TARGET_W and 2.0 / TARGET_H
+    screenSnap[0] = Math.round(rawShiftX * (TARGET_W * 0.5)) * (2.0 / TARGET_W);
+    screenSnap[1] = Math.round(rawShiftY * (TARGET_H * 0.5)) * (2.0 / TARGET_H);
+
+    // 2. Idle Showcase Mode: after 6s of no input, drift candles slowly along preset paths + draught every 15s
+    if (!programmaticOverride && !dragState && (nowSec - lastInputTime > 6.0)) {
+      if (!showcaseActive) {
+        showcaseActive = true;
+        lastAutoDraughtTime = nowSec;
+      }
+      showcasePhase += dt * 0.22;
+      if (nowSec - lastAutoDraughtTime > 15.0) {
+        draughtStartTime = nowSec;
+        lastAutoDraughtTime = nowSec;
+      }
+      // Preset showcase orbits behind & around the glassware so shadows swing & red caustics bloom!
+      const goals = [
+        [-0.58 + 0.95 * Math.sin(showcasePhase * 0.85), -1.18 + 0.35 * Math.cos(showcasePhase * 0.65)],
+        [ 0.78 + 0.72 * Math.cos(showcasePhase * 0.72), -0.98 + 0.48 * Math.sin(showcasePhase * 0.95)],
+        [-1.78 + 0.45 * Math.cos(showcasePhase * 0.55),  0.15 + 0.68 * Math.sin(showcasePhase * 0.62)]
+      ];
+      for (let i = 0; i < 3; i++) {
+        const c = candles[i];
+        const stepRate = 1.0 - Math.exp(-dt * 0.85);
+        const [nx, nz] = resolveCandlePosition(i, c.x + (goals[i][0] - c.x) * stepRate, c.z + (goals[i][1] - c.z) * stepRate);
+        c.vx = (nx - c.x) / Math.max(dt, 1e-4);
+        c.vz = (nz - c.z) / Math.max(dt, 1e-4);
+        c.x = nx; c.z = nz;
+        c.y = getTableSurfaceY(nx, nz);
+      }
+    } else {
+      for (let i = 0; i < 3; i++) {
+        if (!dragState || dragState.candleIdx !== i) {
+          candles[i].vx *= Math.exp(-dt * 12.0);
+          candles[i].vz *= Math.exp(-dt * 12.0);
+        }
+      }
+    }
+
+    // 3. Draught envelope (2.0 seconds bend + gutter + recovery)
+    const dAge = nowSec - draughtStartTime;
+    let draughtAmt = 0.0;
+    if (dAge >= 0.0 && dAge < 2.0) {
+      const u = dAge / 2.0;
+      draughtAmt = Math.sin(Math.pow(u, 0.55) * Math.PI) * (0.82 + 0.18 * Math.sin(dAge * 16.0));
+    }
+    draughtVec[0] = draughtAmt * 0.135;
+    draughtVec[1] = draughtAmt * 0.048;
+
+    // 4. Wine pouring & meniscus slosh spring
+    const prevPour = currentPourRatio;
+    currentPourRatio += (targetPourRatio - currentPourRatio) * (1.0 - Math.exp(-dt * 9.0));
+    pourVel = (currentPourRatio - prevPour) / Math.max(dt, 1e-4);
+    sloshVX += (-sloshX * 28.0 - sloshVX * 5.2) * dt;
+    sloshVZ += (-sloshZ * 28.0 - sloshVZ * 5.2) * dt;
+    sloshX = clamp(sloshX + sloshVX * dt, -0.06, 0.06);
+    sloshZ = clamp(sloshZ + sloshVZ * dt, -0.06, 0.06);
+
+    // Conserve wine between Decanter (y: 0.22..0.66) and Half-Full Glass 1 (y: 0.52..0.92)
+    uWineLevelsVec[0] = 0.65 - currentPourRatio * 0.36;
+    uWineLevelsVec[1] = 0.53 + currentPourRatio * 0.39;
+    uWineLevelsVec[2] = 0.482; // Almost empty puddle in Glass 2
+
+    // 5. Update per-candle lit fade (0.3s blow-out), flame spring lean, and 1800K warm light colours
+    for (let i = 0; i < 3; i++) {
+      const c = candles[i];
+      // Fade over 0.3s when blown out or relit
+      const fadeSpeed = dt / 0.30;
+      if (c.lit < c.targetLit) c.lit = Math.min(c.targetLit, c.lit + fadeSpeed);
+      else if (c.lit > c.targetLit) c.lit = Math.max(c.targetLit, c.lit - fadeSpeed);
+
+      // Flame leans opposite to candle motion velocity + bends with draught!
+      const targetLeanX = clamp(-c.vx * 0.055 + draughtVec[0], -0.16, 0.16);
+      const targetLeanZ = clamp(-c.vz * 0.055 + draughtVec[1], -0.16, 0.16);
+      c.leanVX += ((targetLeanX - c.leanX) * 42.0 - c.leanVX * 7.5) * dt;
+      c.leanVZ += ((targetLeanZ - c.leanZ) * 42.0 - c.leanVZ * 7.5) * dt;
+      c.leanX += c.leanVX * dt;
+      c.leanZ += c.leanVZ * dt;
+
+      const hoverTarget = (hoveredCandleIdx === i) ? 1.0 : 0.0;
+      candleHoverSmooth[i] += (hoverTarget - candleHoverSmooth[i]) * (1.0 - Math.exp(-dt * 14.0));
+      const hBoost = candleHoverSmooth[i];
+
+      const flk = evalCandleFlicker(c, nowSec, draughtAmt);
+      const stretchTotal = flk.stretch + hBoost * 0.42;
+      const wx = c.x, wy = c.y + c.wickH, wz = c.z;
+      const lx = wx + c.leanX * 0.75 + flk.jitterX;
+      const ly = wy + 0.105 * (1.0 + 0.2 * stretchTotal) * Math.max(c.lit, 0.2);
+      const lz = wz + c.leanZ * 0.75 + flk.jitterZ;
+
+      uCandlePosFlat[i * 3 + 0] = c.x;
+      uCandlePosFlat[i * 3 + 1] = c.y;
+      uCandlePosFlat[i * 3 + 2] = c.z;
+
+      uWickPosFlat[i * 3 + 0] = wx;
+      uWickPosFlat[i * 3 + 1] = wy;
+      uWickPosFlat[i * 3 + 2] = wz;
+
+      uFlameLeanFlat[i * 3 + 0] = c.leanX;
+      uFlameLeanFlat[i * 3 + 1] = c.leanZ;
+      uFlameLeanFlat[i * 3 + 2] = stretchTotal;
+
+      uLightPosFlat[i * 3 + 0] = lx;
+      uLightPosFlat[i * 3 + 1] = ly;
+      uLightPosFlat[i * 3 + 2] = lz;
+
+      // Warm ~1800K candle colour (perks up gently by ~14% when hovered through glass or directly!)
+      const power = 1.62 * flk.intensity * (1.0 + hBoost * 0.14) * (c.lit * c.lit);
+      uLightColFlat[i * 3 + 0] = power * 1.00;
+      uLightColFlat[i * 3 + 1] = power * (0.56 - 0.08 * flk.warmthShift);
+      uLightColFlat[i * 3 + 2] = power * (0.21 - 0.05 * flk.warmthShift);
+
+      uFlameSizeVec[i] = 0.85 + 0.25 * flk.intensity;
+      uFlameLitVec[i] = c.lit;
+
+      uPuffFlat[i * 4 + 0] = c.puffX;
+      uPuffFlat[i * 4 + 1] = c.puffY;
+      uPuffFlat[i * 4 + 2] = c.puffZ;
+      uPuffFlat[i * 4 + 3] = (c.puffTime > 0) ? (nowSec - c.puffTime) : -1.0;
+    }
+
+    // 6. Dispatch non-blocking Web Worker back-to-front radix sort
+    if (!workerBusy) {
+      workerBusy = true;
+      sortWorker.postMessage({
+        type: 'sort',
+        indices: workerTransferBuf,
+        viewRowZ: [mView[2], mView[6], mView[10], mView[14]],
+        candlePos: uCandlePosFlat,
+        wickPos: uWickPosFlat,
+        puffPos: uPuffFlat,
+        time: nowSec
+      }, [workerTransferBuf.buffer]);
+    }
+    if (sortUpdated) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, sortedIndexBuf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, sortedIndicesGPU);
+      sortUpdated = false;
+    }
+  }
+
+  function renderFrame(nowMs) {
+    const nowSec = nowMs * 0.001;
+    const dt = clamp(nowSec - prevTime, 0.001, 0.05);
+    prevTime = nowSec;
+    fpsSmooth = fpsSmooth * 0.92 + (1.0 / dt) * 0.08;
+    frameCounter++;
+
+    updateSimulation(nowSec, dt);
+
+    // -----------------------------------------------------------------------
+    // PASS 1: Omnidirectional Dual-Paraboloid Shadow Maps (3 candles x 2 hemi)
+    // -----------------------------------------------------------------------
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboShadow);
+    gl.viewport(0, 0, SHADOW_ATLAS_W, SHADOW_ATLAS_H);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.disable(gl.BLEND);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthMask(true);
+    gl.clearColor(1.0, 1.0, 1.0, 0.0);
+    gl.clearDepth(1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, splatTex);
+
+    for (let cIdx = 0; cIdx < 3; cIdx++) {
+      if (uFlameLitVec[cIdx] < 0.01) continue;
+      const lx = uLightPosFlat[cIdx * 3], ly = uLightPosFlat[cIdx * 3 + 1], lz = uLightPosFlat[cIdx * 3 + 2];
+
+      for (let hIdx = 0; hIdx < 2; hIdx++) {
+        const hemiSign = hIdx === 0 ? -1.0 : 1.0;
+        gl.viewport(cIdx * SHADOW_SIZE, hIdx * SHADOW_SIZE, SHADOW_SIZE, SHADOW_SIZE);
+
+        // 1a. Shadow-casting splats write Z-depth
+        gl.useProgram(progShadowSplat);
+        gl.uniform1i(uShadowSplat['uSplatTex'], 0);
+        gl.uniform3fv(uShadowSplat['uCandlePos[0]'], uCandlePosFlat);
+        gl.uniform3f(uShadowSplat['uLightPos'], lx, ly, lz);
+        gl.uniform1f(uShadowSplat['uHemiSign'], hemiSign);
+        gl.bindVertexArray(shadowSplatVAO);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, shadowIndexArr.length);
+
+        // 1b. Analytic glass & wine shadow transmittance (writes colour only, preserves opaque Z!)
+        gl.depthMask(false);
+        gl.disable(gl.DEPTH_TEST);
+        gl.useProgram(progShadowGlass);
+        gl.uniform3f(uShadowGlass['uLightPos'], lx, ly, lz);
+        gl.uniform1f(uShadowGlass['uHemiSign'], hemiSign);
+        gl.uniform4fv(uShadowGlass['uVessels[0]'], uVesselsFlat);
+        gl.uniform3fv(uShadowGlass['uWineLevels'], uWineLevelsVec);
+        gl.uniform2f(uShadowGlass['uWineSlosh'], sloshX, sloshZ);
+        gl.uniform1f(uShadowGlass['uTime'], nowSec);
+        gl.bindVertexArray(emptyVAO);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(true);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // PASS 2A: Opaque Splat Linear Depth Prepass (640x360)
+    // -----------------------------------------------------------------------
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtSplatDepth.fbo);
+    gl.viewport(0, 0, TARGET_W, TARGET_H);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    gl.clearColor(20.0, 0.0, 0.0, 1.0);
+    gl.clearDepth(1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.useProgram(progSplatDepth);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, splatTex);
+    gl.uniform1i(uSplatDepth['uSplatTex'], 0);
+    gl.uniformMatrix4fv(uSplatDepth['uView'], false, mView);
+    gl.uniform2f(uSplatDepth['uFocalPx'], FOCAL_PX, FOCAL_PY);
+    gl.uniform2fv(uSplatDepth['uScreenSnap'], screenSnap);
+    gl.uniform3fv(uSplatDepth['uCandlePos[0]'], uCandlePosFlat);
+    gl.uniform3fv(uSplatDepth['uWickPos[0]'], uWickPosFlat);
+    gl.uniform3fv(uSplatDepth['uFlameLean[0]'], uFlameLeanFlat);
+    gl.uniform3fv(uSplatDepth['uFlameLit'], uFlameLitVec);
+    gl.uniform4fv(uSplatDepth['uPuffState[0]'], uPuffFlat);
+    gl.uniform2fv(uSplatDepth['uDraughtVec'], draughtVec);
+    gl.uniform1f(uSplatDepth['uTime'], nowSec);
+    gl.bindVertexArray(splatVAO);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, splatCount);
+
+    // -----------------------------------------------------------------------
+    // PASS 2B: Sorted Back-to-Front 3D Gaussian Splats Lighting Pass (640x360)
+    // -----------------------------------------------------------------------
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtSplatColor.fbo);
+    gl.viewport(0, 0, TARGET_W, TARGET_H);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    // Deep Caravaggio plum-slate room background (never pure black)
+    gl.clearColor(0.008, 0.006, 0.012, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+    gl.useProgram(progSplatColor);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, splatTex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, shadowColorTex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, shadowDepthTex);
+
+    gl.uniform1i(uSplatColor['uSplatTex'], 0);
+    gl.uniform1i(uSplatColor['uShadowTex'], 1);
+    gl.uniform1i(uSplatColor['uShadowDepth'], 2);
+    gl.uniformMatrix4fv(uSplatColor['uView'], false, mView);
+    gl.uniform2f(uSplatColor['uFocalPx'], FOCAL_PX, FOCAL_PY);
+    gl.uniform2fv(uSplatColor['uScreenSnap'], screenSnap);
+    gl.uniform3fv(uSplatColor['uCandlePos[0]'], uCandlePosFlat);
+    gl.uniform3fv(uSplatColor['uWickPos[0]'], uWickPosFlat);
+    gl.uniform3fv(uSplatColor['uFlameLean[0]'], uFlameLeanFlat);
+    gl.uniform3fv(uSplatColor['uFlameLit'], uFlameLitVec);
+    gl.uniform4fv(uSplatColor['uPuffState[0]'], uPuffFlat);
+    gl.uniform2fv(uSplatColor['uDraughtVec'], draughtVec);
+    gl.uniform1f(uSplatColor['uTime'], nowSec);
+    gl.uniform3fv(uSplatColor['uCamPos'], camEye);
+    gl.uniform3fv(uSplatColor['uLightPos[0]'], uLightPosFlat);
+    gl.uniform3fv(uSplatColor['uLightCol[0]'], uLightColFlat);
+    gl.uniform3fv(uSplatColor['uFlameSize'], uFlameSizeVec);
+
+    gl.bindVertexArray(splatVAO);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, splatCount);
+
+    // -----------------------------------------------------------------------
+    // PASS 3: 61,440 GPU Photon Splatting Caustics + Temporal Accumulation
+    // -----------------------------------------------------------------------
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtCausticRaw.fbo);
+    gl.viewport(0, 0, TARGET_W, TARGET_H);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE); // Additive photon energy deposition!
+
+    gl.useProgram(progPhotonCaustic);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rtSplatDepth.tex);
+    gl.uniform1i(uPhoton['uSplatDepthTex'], 0);
+    gl.uniformMatrix4fv(uPhoton['uViewProj'], false, mViewProj);
+    gl.uniform2fv(uPhoton['uScreenSnap'], screenSnap);
+    gl.uniform3fv(uPhoton['uLightPos[0]'], uLightPosFlat);
+    gl.uniform3fv(uPhoton['uLightCol[0]'], uLightColFlat);
+    gl.uniform3fv(uPhoton['uFlameLit'], uFlameLitVec);
+    gl.uniform1f(uPhoton['uFrameSeed'], (frameCounter % 32) / 32.0);
+    gl.uniform4fv(uPhoton['uVessels[0]'], uVesselsFlat);
+    gl.uniform3fv(uPhoton['uWineLevels'], uWineLevelsVec);
+    gl.uniform2f(uPhoton['uWineSlosh'], sloshX, sloshZ);
+    gl.uniform1f(uPhoton['uTime'], nowSec);
+
+    gl.bindVertexArray(emptyVAO);
+    gl.drawArrays(gl.POINTS, 0, PHOTON_COUNT);
+
+    // Temporal blend for silky-dense caustic pools that still slide immediately when a candle moves!
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtCausticWrite.fbo);
+    gl.useProgram(progCausticAccum);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rtCausticRaw.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, rtCausticRead.tex);
+    gl.uniform1i(uCausticAccum['uCausticNew'], 0);
+    gl.uniform1i(uCausticAccum['uCausticPrev'], 1);
+    const motionSpeed = Math.hypot(
+      candles[0].vx, candles[0].vz, candles[1].vx, candles[1].vz, candles[2].vx, candles[2].vz
+    ) + Math.abs(pourVel) * 4.0;
+    const causticAlpha = frameCounter < 3 ? 1.0 : clamp(0.24 + motionSpeed * 0.25, 0.24, 0.72);
+    gl.uniform1f(uCausticAccum['uBlendAlpha'], causticAlpha);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Swap caustic temporal ping-pong
+    { const tmp = rtCausticRead; rtCausticRead = rtCausticWrite; rtCausticWrite = tmp; }
+
+    // Combine Lit Splats + Caustic Buffer into rtSceneA BEFORE Glass Ray-Tracing
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtSceneA.fbo);
+    gl.useProgram(progSceneCombine);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rtSplatColor.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, rtCausticRead.tex);
+    gl.uniform1i(uSceneCombine['uSplatColorTex'], 0);
+    gl.uniform1i(uSceneCombine['uCausticTex'], 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // -----------------------------------------------------------------------
+    // PASS 4: Analytic Ray-Traced Hero Glass & Wine (Back-to-Front over Bounds)
+    // -----------------------------------------------------------------------
+    const vesselOrder = [0, 1, 2].sort((a, b) => {
+      const da = Math.hypot(uVesselsFlat[a * 4] - camEye[0], uVesselsFlat[a * 4 + 2] - camEye[2]);
+      const db = Math.hypot(uVesselsFlat[b * 4] - camEye[0], uVesselsFlat[b * 4 + 2] - camEye[2]);
+      return db - da; // furthest vessel first so nearer vessel refracts it!
+    });
+
+    for (let k = 0; k < 3; k++) {
+      const vIdx = vesselOrder[k];
+      // Copy current scene rtSceneA -> rtSceneB, then ray-trace vessel over its screen bounds into rtSceneB
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, rtSceneA.fbo);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, rtSceneB.fbo);
+      gl.blitFramebuffer(0, 0, TARGET_W, TARGET_H, 0, 0, TARGET_W, TARGET_H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, rtSceneB.fbo);
+      gl.viewport(0, 0, TARGET_W, TARGET_H);
+      gl.useProgram(progGlass);
+
+      const bounds = computeVesselScreenBounds(vIdx);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, rtSceneA.tex);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, rtSplatDepth.tex);
+
+      gl.uniform1i(uGlass['uSceneTex'], 0);
+      gl.uniform1i(uGlass['uSplatDepthTex'], 1);
+      gl.uniform4f(uGlass['uBoundsUV'], bounds[0], bounds[1], bounds[2], bounds[3]);
+      gl.uniformMatrix4fv(uGlass['uInvViewProj'], false, mInvViewProj);
+      gl.uniformMatrix4fv(uGlass['uViewProj'], false, mViewProj);
+      gl.uniformMatrix4fv(uGlass['uView'], false, mView);
+      gl.uniform2fv(uGlass['uScreenSnap'], screenSnap);
+      gl.uniform3fv(uGlass['uCamPos'], camEye);
+      gl.uniform1i(uGlass['uVesselIdx'], vIdx);
+      gl.uniform3fv(uGlass['uWickPos[0]'], uWickPosFlat);
+      gl.uniform3fv(uGlass['uFlameLean[0]'], uFlameLeanFlat);
+      gl.uniform3fv(uGlass['uLightPos[0]'], uLightPosFlat);
+      gl.uniform3fv(uGlass['uLightCol[0]'], uLightColFlat);
+      gl.uniform3fv(uGlass['uFlameLit'], uFlameLitVec);
+      gl.uniform4fv(uGlass['uVessels[0]'], uVesselsFlat);
+      gl.uniform3fv(uGlass['uWineLevels'], uWineLevelsVec);
+      gl.uniform2f(uGlass['uWineSlosh'], sloshX, sloshZ);
+      gl.uniform1f(uGlass['uTime'], nowSec);
+
+      gl.bindVertexArray(emptyVAO);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+      const tmp = rtSceneA; rtSceneA = rtSceneB; rtSceneB = tmp;
+    }
+
+    // -----------------------------------------------------------------------
+    // PASS 5: 640x360 HDR Bloom (Flame Halos & Facet/Rim Glints BEFORE Palette)
+    // -----------------------------------------------------------------------
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtBloomExtract.fbo);
+    gl.viewport(0, 0, TARGET_W, TARGET_H);
+    gl.useProgram(progBloomExtract);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rtSceneA.tex);
+    gl.uniform1i(uBloomExtract['uHdrTex'], 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Fine 640x360 separable blur (crisp glint glow)
+    gl.useProgram(progBloomBlur);
+    gl.uniform1i(uBloomBlur['uTex'], 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtBloomTemp.fbo);
+    gl.bindTexture(gl.TEXTURE_2D, rtBloomExtract.tex);
+    gl.uniform2f(uBloomBlur['uDir'], 1.0 / TARGET_W, 0.0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtBloomFine.fbo);
+    gl.bindTexture(gl.TEXTURE_2D, rtBloomTemp.tex);
+    gl.uniform2f(uBloomBlur['uDir'], 0.0, 1.0 / TARGET_H);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Wide 320x180 separable blur (soft warm Caravaggio flame halo)
+    gl.viewport(0, 0, 320, 180);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtBloomWideTmp.fbo);
+    gl.bindTexture(gl.TEXTURE_2D, rtBloomFine.tex);
+    gl.uniform2f(uBloomBlur['uDir'], 1.6 / 320.0, 0.0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtBloomWide.fbo);
+    gl.bindTexture(gl.TEXTURE_2D, rtBloomWideTmp.tex);
+    gl.uniform2f(uBloomBlur['uDir'], 0.0, 1.6 / 180.0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // -----------------------------------------------------------------------
+    // PASS 6: 640x360 48-Colour Palette Snap & Light 4x4 Ordered Bayer Dither
+    // -----------------------------------------------------------------------
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtPaletted.fbo);
+    gl.viewport(0, 0, TARGET_W, TARGET_H);
+    gl.useProgram(progPaletteDither);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rtSceneA.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, rtBloomFine.tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, rtBloomWide.tex);
+    gl.uniform1i(uPaletteDither['uHdrTex'], 0);
+    gl.uniform1i(uPaletteDither['uBloomFineTex'], 1);
+    gl.uniform1i(uPaletteDither['uBloomWideTex'], 2);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // -----------------------------------------------------------------------
+    // PASS 7: Integer NearestFilter Upscale (x3 on 1080p+) + Letterbox
+    // -----------------------------------------------------------------------
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.031, 0.023, 0.039, 1.0); // #08060a letterbox frame
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.viewport(viewRect.physX, viewRect.physY, viewRect.physW, viewRect.physH);
+    gl.useProgram(progUpscale);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rtPaletted.tex);
+    gl.uniform1i(uUpscale['uPalettedTex'], 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    requestAnimationFrame(renderFrame);
+  }
+
+  // Expose internal diagnostic API for automated visual & FPS verification (zero UI)
+  window.__SCENE__ = {
+    getStats: () => ({
+      fps: fpsSmooth,
+      frames: frameCounter,
+      splatCount,
+      photonCount: PHOTON_COUNT,
+      pourRatio: currentPourRatio,
+      wineLevels: Array.from(uWineLevelsVec),
+      candles: candles.map(c => ({ x: c.x, y: c.y, z: c.z, lit: c.lit })),
+      scale: viewRect.scale
+    }),
+    setPreset: (name) => {
+      programmaticOverride = true;
+      lastInputTime = performance.now() * 0.001;
+      if (name === 'default') {
+        programmaticOverride = false;
+        const pos = [[-0.62, -0.96], [0.68, -0.96], [-1.76, 0.08]];
+        pos.forEach(([x, z], i) => {
+          candles[i].x = x; candles[i].z = z; candles[i].y = getTableSurfaceY(x, z);
+          candles[i].lit = 1; candles[i].targetLit = 1;
+        });
+      } else if (name === 'behind_decanter') {
+        // Candle directly behind decanter belly: ruby glowing rim & big red caustic pool forward!
+        const pos = [[-0.60, -0.88], [0.64, -0.96], [1.58, -0.45]];
+        pos.forEach(([x, z], i) => {
+          candles[i].x = x; candles[i].z = z; candles[i].y = getTableSurfaceY(x, z);
+          candles[i].lit = 1; candles[i].targetLit = 1;
+        });
+      } else if (name === 'side_triple') {
+        // Candles to the left/back-left side: 3 well-separated candles casting long overlapping triple shadows, each with red caustic!
+        const pos = [[-1.52, -0.92], [-1.96, -0.32], [-1.62, 0.28]];
+        pos.forEach(([x, z], i) => {
+          candles[i].x = x; candles[i].z = z; candles[i].y = getTableSurfaceY(x, z);
+          candles[i].lit = 1; candles[i].targetLit = 1;
+        });
+      } else if (name === 'one_candle_chiaroscuro') {
+        // Single candle left: hard Caravaggio chiaroscuro, deep plum shadow, glass lit from one side!
+        const pos = [[-1.68, -0.18], [0.82, -1.08], [1.62, 0.25]];
+        pos.forEach(([x, z], i) => {
+          candles[i].x = x; candles[i].z = z; candles[i].y = getTableSurfaceY(x, z);
+          candles[i].lit = (i === 0 ? 1 : 0);
+          candles[i].targetLit = (i === 0 ? 1 : 0);
+        });
+      }
+    },
+    setPour: (r) => { targetPourRatio = clamp(r, 0.04, 0.96); },
+    triggerDraught: () => { draughtStartTime = performance.now() * 0.001; },
+    samplePalettedStats: () => {
+      const buf = new Uint8Array(TARGET_W * TARGET_H * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, rtPaletted.fbo);
+      gl.readPixels(0, 0, TARGET_W, TARGET_H, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      const colors = new Set();
+      let pureBlackCount = 0;
+      for (let i = 0; i < buf.length; i += 4) {
+        const key = (buf[i] << 16) | (buf[i + 1] << 8) | buf[i + 2];
+        colors.add(key);
+        if (buf[i] === 0 && buf[i + 1] === 0 && buf[i + 2] === 0) pureBlackCount++;
+      }
+      return { uniqueColors: colors.size, pureBlackCount };
+    }
+  };
+
+  requestAnimationFrame(renderFrame);
+})();
+</script>
+</body>
+</html>

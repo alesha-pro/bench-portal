@@ -1,0 +1,22 @@
+{
+  "slug": "candle-and-wine-gemini-4-carbon",
+  "title": "Candle & Wine",
+  "category": "visuals",
+  "model": "Gemini 4 Carbon",
+  "version": "Gemini 4 Carbon · November 2026",
+  "summary": "A Caravaggio-lit decanter and wine glasses in pixel art, with movable candles, refraction and ruby caustics.",
+  "description": "A candlelit still life on an oak tavern table in the spirit of Caravaggio: a crystal decanter and two wine glasses over ~44.5k oriented 3D Gaussian splats, rendered at 640x360 with a 48-colour procedural Oklab palette, 4x4 Bayer dithering and nearest-neighbour upscaling. Analytic ray-traced glass with chromatic dispersion, Beer-Lambert wine absorption, curved meniscus, wine legs, dual-paraboloid candle shadows and 61,440 GPU photon caustics per frame. Drag the two beeswax candles anywhere on the table (including behind the glassware), scroll over the decanter to pour wine into the left glass, click a flame to snuff or relight it, press Space for a draught of air, and press 1-3 for lighting presets. One self-contained WebGL2 HTML file with zero external assets, built by Gemini 4 Carbon in Factory Droid.",
+  "accent": "#d94b58",
+  "tags": [
+    "Pixel art",
+    "Gaussian splats",
+    "WebGL",
+    "GLSL",
+    "Raytracing",
+    "Caustics",
+    "Interactive",
+    "Candle & Wine",
+    "Factory Droid"
+  ],
+  "cover": "cover.webp"
+}
