@@ -1,0 +1,21 @@
+{
+  "slug": "cathedral-of-light-kimi-k3.1-pro",
+  "title": "The Cathedral of Light",
+  "category": "visuals",
+  "model": "Kimi K3.1 Pro",
+  "version": "Kimi K3.1 Pro · November 2026",
+  "summary": "An ancient block-built forest at dawn with thick volumetric sun shafts through mist.",
+  "description": "An ancient block-built forest in early morning, where low sunlight pours through gaps in the canopy as volumetric shafts into drifting mist. Pixel art rendered into a 270 px tall HDR buffer with nearest-neighbour upscaling, procedural 16x16 block textures and shadow-mapped light shafts. Living Day & Night build: drag to orbit, scroll to zoom, right-drag to pan, WASD to move, with a settings panel that relights the forest live. One self-contained HTML file with three.js. Built by Kimi K3.1 Pro in DeepSeek Harness from the same prompt as the other entries in this comparison.",
+  "accent": "#c9d65a",
+  "tags": [
+    "Pixel art",
+    "Three.js",
+    "WebGL",
+    "Volumetric light",
+    "Voxel",
+    "Interactive",
+    "Cathedral comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}

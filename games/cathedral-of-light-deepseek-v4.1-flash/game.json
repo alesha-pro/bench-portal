@@ -1,0 +1,21 @@
+{
+  "slug": "cathedral-of-light-deepseek-v4.1-flash",
+  "title": "The Cathedral of Light",
+  "category": "visuals",
+  "model": "DeepSeek V4.1",
+  "version": "DeepSeek V4.1 Flash (1017) · November 2026",
+  "summary": "An ancient block-built forest at dawn with thick volumetric sun shafts through mist.",
+  "description": "An ancient block-built forest in early morning, where low sunlight pours through gaps in the canopy as volumetric shafts into drifting mist. Pixel art rendered into a 270 px tall HDR buffer with nearest-neighbour upscaling, procedural 16x16 block textures and shadow-mapped light shafts. A self-running 30 second seamless loop with procedural audio; click once for sound. One self-contained HTML file with three.js. Built by DeepSeek V4.1 Flash (1017) in DeepSeek Harness from the same prompt as the other entries in this comparison.",
+  "accent": "#c9d65a",
+  "tags": [
+    "Pixel art",
+    "Three.js",
+    "WebGL",
+    "Volumetric light",
+    "Voxel",
+    "Loop",
+    "Cathedral comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}

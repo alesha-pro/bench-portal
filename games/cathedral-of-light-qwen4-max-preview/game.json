@@ -1,0 +1,21 @@
+{
+  "slug": "cathedral-of-light-qwen4-max-preview",
+  "title": "The Cathedral of Light",
+  "category": "visuals",
+  "model": "Qwen 4 Max Preview",
+  "version": "Qwen 4 Max Preview · November 2026",
+  "summary": "An ancient block-built forest at dawn with thick volumetric sun shafts through mist.",
+  "description": "An ancient block-built forest in early morning, where low sunlight pours through gaps in the canopy as volumetric shafts into drifting mist. Pixel art rendered into a 270 px tall HDR buffer with nearest-neighbour upscaling, procedural 16x16 block textures and shadow-mapped light shafts. Interactive build: drag to orbit, scroll to zoom, right-drag to pan, with sliders that relight the forest live. One self-contained HTML file with three.js. Built by Qwen 4 Max Preview in DeepSeek Harness from the same prompt as the other entries in this comparison.",
+  "accent": "#c9d65a",
+  "tags": [
+    "Pixel art",
+    "Three.js",
+    "WebGL",
+    "Volumetric light",
+    "Voxel",
+    "Interactive",
+    "Cathedral comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}

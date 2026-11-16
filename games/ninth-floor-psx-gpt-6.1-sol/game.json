@@ -1,0 +1,21 @@
+{
+  "slug": "ninth-floor-psx-gpt-6.1-sol",
+  "title": "Ninth Floor",
+  "category": "visuals",
+  "model": "GPT-6.1 Sol",
+  "version": "GPT-6.1 Sol · November 2026",
+  "summary": "A smoke break at a 9th-floor window while a post-Soviet district runs from dawn to dusk.",
+  "description": "First-person view of a man smoking at his 9th-floor window in a panel block while the post-Soviet district outside goes from dawn to dusk in warm yellow and orange tones. PSX-style low-poly 3D at full resolution with real light and sun shafts through the smoke. One self-contained HTML file; no assets. Built by GPT-6.1 Sol in DeepSeek Harness with high reasoning from the same prompt as the other 7 entries in this comparison, then revised over 2 to 5 rounds of feedback with screenshots taken on a real GPU.",
+  "accent": "#f0a04b",
+  "tags": [
+    "PSX",
+    "Low poly",
+    "Three.js",
+    "WebGL",
+    "Volumetric light",
+    "Timelapse",
+    "Ninth Floor comparison",
+    "DeepSeek Harness"
+  ],
+  "cover": "cover.webp"
+}
