@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#07090d" />
+    <meta name="theme-color" content="#0e1820" />
     <meta
       name="description"
       content="A catalog of AI-built games, interactive worlds and visual experiments."
@@ -11,41 +11,78 @@
     <title>Bench Portal</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%2307090d'/%3E%3Crect x='7' y='7' width='50' height='50' rx='3' fill='none' stroke='%23ff5a32' stroke-width='3'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-weight='700' font-size='20' fill='%23ff5a32'%3EBP%3C/text%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%230e1820'/%3E%3Cpath fill='%2321434a' d='M5 1h6v1h-1v3h1v1h1v1h1v5h-1v1h-1v1H5v-1H4v-1H3V7h1V6h1V5h1V2H5z'/%3E%3Cpath fill='%23f2bb6a' d='M5 1h6v1H5zM4 8h1v3H4zM5 7h1v1H5z'/%3E%3Cpath fill='%23fce4b0' d='M4 9h1v1H4z'/%3E%3C/svg%3E"
+    />
+    <link
+      rel="preload"
+      href="./assets/fonts/instrument-serif.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="noise" aria-hidden="true"></div>
+    <canvas id="light" class="lightfield" aria-hidden="true"></canvas>
+    <a class="skip-link" href="#library">Skip to the collection</a>
+
     <header class="masthead">
       <a class="brand" href="./" aria-label="Bench Portal home">
-        <span class="brand-mark">BP</span>
+        <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            class="glass"
+            d="M5 1h6v1h-1v3h1v1h1v1h1v5h-1v1h-1v1H5v-1H4v-1H3V7h1V6h1V5h1V2H5z"
+          />
+          <path class="glint" d="M5 1h6v1H5zM4 8h1v3H4zM5 7h1v1H5z" />
+        </svg>
         <span>BENCH PORTAL</span>
       </a>
       <div class="status">
-        <i></i><span id="game-count">LOADING BUILDS</span>
+        <i aria-hidden="true"></i><span id="game-count">LOADING BUILDS</span>
       </div>
     </header>
 
     <main>
       <section class="hero">
-        <div>
+        <div class="hero-copy">
           <p class="eyebrow">THE AI BUILD COLLECTION</p>
-          <h1>Explore the <em>builds.</em></h1>
-          <p class="intro">
-            Games, interactive worlds and visual experiments.<br />Built by
-            different models. Open a project and try it yourself.
+          <h1 data-lit>
+            <span data-light="12" data-light-text data-light-ascent="0.78"
+              >Bench</span
+            >
+            <em data-light="12" data-light-text data-light-ascent="0.78"
+              >Portal</em
+            >
+          </h1>
+          <p class="intro" data-light="2">
+            Games, interactive worlds and visual experiments, built by different
+            models. Open a project and try it yourself.
           </p>
-        </div>
-        <div class="collection-stats" aria-label="Collection overview">
-          <div>
-            <strong id="total-builds">—</strong><span>live builds</span>
+          <div class="collection-stats" aria-label="Collection overview">
+            <div>
+              <strong id="total-builds">—</strong><span>live builds</span>
+            </div>
+            <div><strong id="total-models">—</strong><span>models</span></div>
+            <div>
+              <strong id="total-sections">—</strong><span>collections</span>
+            </div>
           </div>
-          <div><strong id="total-models">—</strong><span>models</span></div>
-          <div>
-            <strong id="total-sections">—</strong><span>collections</span>
-          </div>
         </div>
+        <figure class="hero-glass" aria-hidden="true">
+          <div class="vase" data-light="22" data-light-glass>
+            <svg class="vase-fallback" viewBox="0 0 16 16">
+              <path
+                class="glass"
+                d="M5 1h6v1h-1v3h1v1h1v1h1v5h-1v1h-1v1H5v-1H4v-1H3V7h1V6h1V5h1V2H5z"
+              />
+              <path class="glint" d="M5 1h6v1H5zM4 8h1v3H4zM5 7h1v1H5z" />
+            </svg>
+          </div>
+          <figcaption class="lamp-hint">
+            <span class="hint-pointer">Move the lamp</span
+            ><span class="hint-touch">Tap to move the lamp</span>
+          </figcaption>
+        </figure>
       </section>
 
       <section class="library" aria-labelledby="library-title" id="library">
@@ -54,11 +91,19 @@
           <span>FIND YOUR NEXT EXPERIMENT</span>
         </div>
         <div class="browse-controls" id="browse-controls">
-          <form id="filters" role="search" aria-label="Filter builds">
+          <form
+            id="filters"
+            class="shelf"
+            role="search"
+            aria-label="Filter builds"
+            data-light="4"
+            data-lit
+          >
             <div class="search-field">
-              <svg aria-hidden="true" viewBox="0 0 24 24">
-                <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="m16 16 5 5" />
+              <svg aria-hidden="true" viewBox="0 0 12 12">
+                <path
+                  d="M4 1h3v1h1v1h1v3H8v1H7v1H4V7H3V6H2V3h1V2h1zm0 2v3h3V3zm4 5h1v1h1v1h1v1h-1v-1H9V9H8z"
+                />
               </svg>
               <label class="sr-only" for="search">Search builds</label>
               <input
@@ -75,7 +120,11 @@
                 aria-label="Clear search"
                 hidden
               >
-                ×
+                <svg aria-hidden="true" viewBox="0 0 8 8">
+                  <path
+                    d="M1 1h1v1H1zm1 1h1v1H2zm1 1h2v2H3zm2-1h1v1H5zm1-1h1v1H6zM2 5h1v1H2zM1 6h1v1H1zm4-1h1v1H5zm1 1h1v1H6z"
+                  />
+                </svg>
               </button>
               <kbd aria-hidden="true">/</kbd>
             </div>
@@ -115,7 +164,7 @@
           </button>
         </div>
         <div id="game-grid" aria-busy="true">
-          <div class="loading-card">Getting the builds ready…</div>
+          <div class="loading-card">Warming up the lamp…</div>
         </div>
         <noscript
           ><p class="empty-state">
@@ -125,7 +174,7 @@
       </section>
     </main>
 
-    <footer>
+    <footer data-light="2">
       <span>WEBGL / DESKTOP RECOMMENDED</span>
       <div class="footer-links">
         <a href="https://x.com/superalesha">@superalesha ↗</a

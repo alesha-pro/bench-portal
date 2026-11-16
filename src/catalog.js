@@ -6,7 +6,18 @@ import {
   readFilters,
   writeFilters,
 } from "./catalog-data.js";
+import { createLightfield, lightSurfaces } from "./lightfield.js";
 const $ = (id) => document.getElementById(id);
+let lightfield = null;
+try {
+  lightfield = createLightfield($("light"));
+  lightfield?.onLight(lightSurfaces);
+} catch (error) {
+  // The catalog must work without the light pass.
+  document.documentElement.classList.add("no-lightfield");
+  document.documentElement.classList.remove("has-lightfield");
+  console.warn("Lightfield unavailable:", error);
+}
 const grid = $("game-grid");
 let games = [],
   state,
@@ -34,6 +45,10 @@ function makeCard(game) {
   const category = categories.find((c) => c.id === game.category);
   const article = element("article", "game-card");
   article.dataset.slug = game.slug;
+  // a physical card: it casts a shadow, rises on hover and catches the lamp
+  article.dataset.light = "6";
+  article.dataset.lightLift = "14";
+  article.dataset.lit = "";
   article.style.setProperty(
     "--game-accent",
     /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(game.accent ?? "")
@@ -158,6 +173,10 @@ function syncControls() {
   $("search").value = state.q;
 }
 function render() {
+  renderGrid();
+  lightfield?.invalidate();
+}
+function renderGrid() {
   const visible = sortGames(filterGames(games, state), state.sort);
   const candidates = filterGames(games, state, { ignoreCategory: true });
   for (const button of $("categories").children) {
