@@ -1,0 +1,21 @@
+{
+  "slug": "dune-walker-gemini-4-neon",
+  "title": "Dune Walker",
+  "category": "visuals",
+  "model": "Gemini 4 Neon",
+  "version": "Gemini 4 Neon · November 2026",
+  "summary": "A 96-second procedural desert sci-fi short in 2.39:1 cinemascope: a lone figure on a dune crest meets a colossal biomechanical walker.",
+  "description": "An interactive 100% procedural Three.js cinematic short with zero external assets, rendered in 2.39:1 anamorphic framing with AgX Filmic tone mapping, cascaded shadow maps, ray-marched volumetric dust shafts, procedural PMREM sky IBL, and Web Audio synthesis. A lone hooded figure in a Verlet-simulated crimson robe stands on a wind-rippled dune ridge as a 110 m carved stone-and-bronze walker emerges past distant megastructures, kneels before her at sunset, and departs into cobalt blue hour before a haboob dust storm resets the cycle into morning light. Drag to orbit around the scene (auto-returns after 5 s), scroll to zoom, or tap/click to blend to the next shot.",
+  "accent": "#d97a38",
+  "tags": [
+    "Three.js",
+    "WebGL",
+    "GLSL",
+    "Procedural",
+    "Volumetrics",
+    "Cinematic",
+    "Dune Walker",
+    "Antigravity"
+  ],
+  "cover": "cover.webp"
+}
