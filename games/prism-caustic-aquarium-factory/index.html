@@ -6,24 +6,32 @@
 <title>Prism Aquarium</title>
 <link rel="icon" href="data:,">
 <style>
-html,body{margin:0;height:100%;background:#04060a;overflow:hidden}
+html,body{margin:0;height:100%;background:#04060a;overflow:hidden;-webkit-user-select:none;user-select:none}
 #c{display:block;width:100vw;height:100vh;touch-action:none;cursor:grab}
+#c.move{cursor:move}
 #c.drag{cursor:grabbing}
-#hint{position:fixed;left:0;right:0;bottom:26px;text-align:center;font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.22em;text-transform:uppercase;color:rgba(215,232,255,.62);pointer-events:none;opacity:0;transition:opacity 1.6s ease;text-shadow:0 0 14px rgba(0,0,0,.9);white-space:nowrap}
+#c.drag.aim{cursor:crosshair}
+#hint{position:fixed;left:0;right:0;bottom:26px;padding:0 24px;text-align:center;font:11px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.18em;text-transform:uppercase;color:rgba(215,232,255,.62);pointer-events:none;opacity:0;transition:opacity 1.6s ease;text-shadow:0 0 14px rgba(0,0,0,.9)}
+#hint span{display:inline-block;white-space:nowrap;margin:0 .9em}
 #hint.show{opacity:1;transition:opacity .5s ease}
+#mode{position:fixed;left:0;right:0;top:22px;text-align:center;font:10px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.26em;text-transform:uppercase;color:rgba(215,232,255,.55);pointer-events:none;opacity:0;transition:opacity .6s ease;text-shadow:0 0 14px rgba(0,0,0,.9)}
+#mode.show{opacity:1}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">drag · orbit&nbsp;&nbsp;&nbsp;wheel · zoom&nbsp;&nbsp;&nbsp;1 2 3 · lighting&nbsp;&nbsp;&nbsp;space · pause</div>
+<div id="mode">move light · L</div>
+<div id="hint"><span>drag · orbit</span><span>wheel · zoom</span><span>shift / right-drag / L · move light</span><span>shift+wheel · distance</span><span>1 2 3 · lighting</span><span>R · reset light</span><span>space · pause</span></div>
 <script>
 "use strict";
 // PRISM AQUARIUM - single-file WebGL2. One SDF scene (glass tank, water, rotating glass cube, crystal
 // prism) raymarched per spectral channel for dispersion; chromatic caustics are real photon traces
 // splatted into a light map; volumetric beam + drifting dust motes; ACES tone map + bloom.
+// The spotlight is a movable fixture orbiting the tank (it always aims at the tank centre): beam,
+// caustics, shadows and the dispersion fan are all re-traced from its current position every frame.
 const $ = (id) => document.getElementById(id);
-const canvas = $('c'), hint = $('hint');
-const HINT_TEXT = hint.textContent;
+const canvas = $('c'), hint = $('hint'), modeTag = $('mode');
+const HINT_HTML = hint.innerHTML;
 const gl = canvas.getContext('webgl2', {antialias:false, alpha:false, depth:false, stencil:false, powerPreference:'high-performance'});
 if (!gl) { hint.textContent = 'WebGL2 is not available in this browser'; hint.classList.add('show'); throw new Error('WebGL2 unavailable'); }
 const extF = gl.getExtension('EXT_color_buffer_float');
@@ -36,7 +44,7 @@ precision highp float;
 precision highp int;
 precision highp sampler3D;
 const int M_AIR=0,M_WATER=1,M_TANK=2,M_CUBE=3,M_PRISM=4,M_BUBBLE=5;
-const int ID_TANK=1,ID_WATER=2,ID_CUBE=3,ID_PRISM=4,ID_SAND=5,ID_PEBBLE=6,ID_BUBBLE=7,ID_FRAME=8,ID_TABLE=9;
+const int ID_TANK=1,ID_WATER=2,ID_CUBE=3,ID_PRISM=4,ID_SAND=5,ID_PEBBLE=6,ID_BUBBLE=7,ID_FRAME=8,ID_TABLE=9,ID_BULB=10;
 const vec3 TANK_C=vec3(0.0,1.82,0.0);
 const vec3 TANK_H=vec3(3.0,1.7,1.8);
 const vec3 TANK_IH=vec3(2.93,1.63,1.73);
@@ -47,10 +55,23 @@ const float BOUND_R=6.6;
 const vec2 BUB_COL=vec2(-2.15,-1.1);
 const vec2 PEB_CS=vec2(1.47,1.15);
 const vec2 PEB_ORG=vec2(-2.94,-1.15);
-const vec2 SPOT_R=vec2(2.5,1.35);
-const float SPOT_Y=1.4;
+const float BULB_R=0.06;
 uniform float uTime;
+// Movable spotlight (a follow spot). uLightDir is the beam direction (scene -> fixture, as for a distant
+// light); the fixture uLightPos always aims at the tank centre, uLightDist away. Far from the tank the
+// beam is collimated, with an elliptical cross-section uLightFoot along uLightT1 (vertical plane) and
+// uLightT2 (horizontal). Brought close, the same beam turns into a cone from the bulb: uLightLens is the
+// fraction of the cross-section the lens still has, and the rays converge on a virtual apex uLightApex
+// (uLightConeP = apex -> fixture, apex -> aim point distances; uLightCone selects the perspective maths).
 uniform vec3 uLightDir;
+uniform vec3 uLightPos;
+uniform vec3 uLightT1;
+uniform vec3 uLightT2;
+uniform vec2 uLightFoot;
+uniform float uLightDist,uLightLens,uBulbSolid;
+uniform vec3 uLightApex;
+uniform vec2 uLightConeP;
+uniform float uLightCone;
 uniform vec3 uLightCol;
 uniform vec3 uWaterAbs;
 uniform mat3 uCubeM;
@@ -64,9 +85,24 @@ float hash12(vec2 p){vec3 p3=fract(vec3(p.xyx)*0.1031);p3+=dot(p3,p3.yzx+33.33);
 vec2 hash22(vec2 p){vec3 p3=fract(vec3(p.xyx)*vec3(0.1031,0.1030,0.0973));p3+=dot(p3,p3.yzx+33.33);return fract((p3.xx+p3.yz)*p3.zy);}
 float sdRoundBox(vec3 p,vec3 b,float r){vec3 q=abs(p)-b+r;return length(max(q,0.0))+min(max(q.x,max(q.y,q.z)),0.0)-r;}
 float sdRect2(vec2 p){return length(max(p,0.0))+min(max(p.x,p.y),0.0);}
+// Spotlight beam seen from the fixture: full inside 70% of the elliptical cross-section, soft edge to
+// the rim, and nothing upstream of the fixture (that is where the beam starts).
 float spotW(vec3 p){
-  vec2 q=(p.xz-uLightDir.xz*((p.y-SPOT_Y)/uLightDir.y))/SPOT_R;
-  return 1.0-smoothstep(0.7,1.0,dot(q,q));
+  vec3 v=p-uLightPos;
+  vec2 q;
+  if(uLightCone<0.5){
+    q=vec2(dot(v,uLightT1),dot(v,uLightT2))/uLightFoot;
+  }else{
+    // cone: the cross-section grows linearly with the distance from the virtual apex
+    vec3 w=p-uLightApex;
+    q=vec2(dot(w,uLightT1),dot(w,uLightT2))/uLightFoot*(uLightConeP.y/max(uLightConeP.x-dot(v,uLightDir),1e-4));
+  }
+  return (1.0-smoothstep(0.7,1.0,dot(q,q)))*step(dot(v,uLightDir),0.0);
+}
+// Where the light ray through q (a point of the water) lands on the light map plane (y = 0).
+vec2 shadowXZ(vec3 q){
+  if(uLightCone<0.5)return q.xz-uLightDir.xz*(q.y/uLightDir.y);
+  return uLightApex.xz+(q.xz-uLightApex.xz)*(uLightApex.y/max(uLightApex.y-q.y,1e-3));
 }
 
 float waveH(vec2 q){
@@ -203,6 +239,7 @@ float sdObj(int id,vec3 p){
   if(id==ID_PEBBLE)return sdPebbles(p);
   if(id==ID_BUBBLE)return sdBubbles(p);
   if(id==ID_FRAME)return sdFrame(p);
+  if(id==ID_BULB)return length(p-uLightPos)-BULB_R;
   return sdTable(p);
 }
 vec3 calcNormal(vec3 p,int id){
@@ -210,7 +247,7 @@ vec3 calcNormal(vec3 p,int id){
   const float e=0.002;
   return normalize(vec3(sdObj(id,p+vec3(e,0.0,0.0))-sdObj(id,p-vec3(e,0.0,0.0)),sdObj(id,p+vec3(0.0,e,0.0))-sdObj(id,p-vec3(0.0,e,0.0)),sdObj(id,p+vec3(0.0,0.0,e))-sdObj(id,p-vec3(0.0,0.0,e))));
 }
-bool isOpaque(int id){return id==ID_SAND||id==ID_PEBBLE||id==ID_FRAME||id==ID_TABLE;}
+bool isOpaque(int id){return id==ID_SAND||id==ID_PEBBLE||id==ID_FRAME||id==ID_TABLE||id==ID_BULB;}
 int medOf(int id){if(id==ID_WATER)return M_WATER;if(id==ID_TANK)return M_TANK;if(id==ID_CUBE)return M_CUBE;if(id==ID_PRISM)return M_PRISM;return M_BUBBLE;}
 float iorOf(int med,int ch){
   float d=float(ch-1);
@@ -254,7 +291,17 @@ void setupInterface(inout Hit h,vec3 rd,int med){
   h.F=fresnel(dot(-rd,h.n),eta);
   h.refr=refract(rd,h.n,eta);
 }
+// The emitter bulb: a small emissive sphere at the fixture, intersected analytically (the marcher never
+// pays for it). Photons ignore it, so the bulb cannot shadow its own beam.
 bool intersect(vec3 ro,vec3 rd,int med,int steps,float eps,out Hit h){
+  if(uBulbSolid>0.5){
+    vec3 oc=ro-uLightPos;
+    float b=dot(oc,rd),c=dot(oc,oc)-BULB_R*BULB_R,d=b*b-c;
+    if(d>0.0){
+      float tb=-b-sqrt(d);
+      if(tb>0.002){h.t=tb;h.id=ID_BULB;h.p=ro+rd*tb;return true;}
+    }
+  }
   float t;int id;
   if(!march(ro,rd,steps,eps,t,id))return false;
   h.t=t;h.id=id;h.p=ro+rd*t;
@@ -285,18 +332,28 @@ uniform vec3 uCamPos,uCamRight,uCamUp,uCamFwd;
 uniform float uFl;
 uniform vec2 uRes;
 uniform vec3 uAmbient,uBgTop,uBgBot,uEnvADir,uEnvACol,uEnvBDir,uEnvBCol;
-uniform float uSoftbox,uScatter,uTableAlb,uCausticScale,uDustGain;
+uniform float uSoftbox,uScatter,uTableAlb,uCausticScale,uDustGain,uBulb,uSoftboxW;
 out vec4 fragColor;
 bool gVol;
 float pick(vec3 v){return gCh==0?v.r:(gCh==1?v.g:v.b);}
-vec3 env(vec3 rd){
+// The room seen from ro. (1) The studio softbox the glass and water reflect: a distant source, so it
+// follows the beam direction; it fades out as the fixture is brought up to the tank (the softbox gives
+// way to the bare bulb). (2) The bulb's share of a reflection that is not worth a full trace - the bulb
+// itself is real geometry, see intersect(). No halo here: rays passing next to it would pick that up.
+vec3 env(vec3 ro,vec3 rd){
   vec3 c=mix(uBgBot,uBgTop,smoothstep(-0.5,0.8,rd.y));
-  c+=uLightCol*smoothstep(0.90,0.985,dot(rd,uLightDir))*uSoftbox;
+  c+=uLightCol*smoothstep(0.90,0.985,dot(rd,uLightDir))*uSoftbox*uSoftboxW;
+  vec3 lv=uLightPos-ro;
+  float ll=max(length(lv),1e-3);
+  float ca=dot(rd,lv/ll);
+  float br=min(BULB_R*BULB_R/(ll*ll),0.01);
+  float bl=smoothstep(1.0-0.61*br,1.0-0.5*br,ca);
+  c+=uLightCol/max(dot(uLightCol,vec3(0.2126,0.7152,0.0722)),1e-3)*(bl*bl*uBulb);
   c+=uEnvACol*pow(max(dot(rd,uEnvADir),0.0),110.0);
   c+=uEnvBCol*pow(max(dot(rd,uEnvBDir),0.0),160.0);
   return c;
 }
-float envc(vec3 rd){return pick(env(rd));}
+float envc(vec3 ro,vec3 rd){return pick(env(ro,rd));}
 vec3 sampleCaustic(vec2 xz,float lod){return textureLod(uCaustic,xz/12.0+0.5,lod).rgb*uCausticScale;}
 float mediumTint(int med){
   if(med==M_WATER)return pick(exp(-2.0*uWaterAbs));
@@ -313,6 +370,7 @@ vec3 shadeOpaque(vec3 p,vec3 n,vec3 rd,int id,out float rw){
   rw=0.0;
   vec3 L=uLightDir;
   vec3 H=normalize(L-rd);
+  if(id==ID_BULB)return uLightCol/max(dot(uLightCol,vec3(0.2126,0.7152,0.0722)),1e-3)*uBulb;
   if(id==ID_SAND){
     vec3 alb=vec3(0.80,0.72,0.56)*(0.94+0.09*hash12(floor(p.xz*22.0)));
     vec3 E=sampleCaustic(p.xz,0.0)*(0.6+0.4*max(n.y,0.0));
@@ -336,7 +394,7 @@ vec3 shadeOpaque(vec3 p,vec3 n,vec3 rd,int id,out float rw){
   vec3 rdir=reflect(rd,n);
   vec3 spec=uLightCol*pow(max(dot(n,H),0.0),60.0)*0.8*sp
     +uEnvACol*pow(max(dot(rdir,uEnvADir),0.0),900.0)+uEnvBCol*pow(max(dot(rdir,uEnvBDir),0.0),1200.0)
-    +env(rdir)*0.06;
+    +env(p,rdir)*0.06;
   return alb*(uLightCol*ndl*sp+uAmbient*(0.5+0.5*n.y)+sampleCaustic(p.xz,1.0)*0.3)+spec;
 }
 // The one volumetric segment integrated per pixel (recorded by the green spectral path).
@@ -345,12 +403,22 @@ vec3 gVolRo=vec3(0.0),gVolRd=vec3(0.0);
 float gVolLen=0.0,gVolT=1.0;
 vec3 integrateVolume(vec3 ro,vec3 rd,float len){
   const int N=28;
+  vec3 L=uLightDir;
+  // the beam only exists downstream of the fixture plane: integrate just that part of the segment
+  float s0=dot(ro-uLightPos,L),ds=dot(rd,L);
+  float t0=0.0,t1=len;
+  if(ds>1e-4)t1=min(len,max(0.0,-s0/ds));
+  else if(ds<-1e-4)t0=clamp(-s0/ds,0.0,len);
+  else if(s0>0.0)return vec3(0.0);
+  len=t1-t0;
+  if(len<1e-3)return vec3(0.0);
+  ro+=rd*t0;
   float dt=len/float(N);
   float jit=hash12(gl_FragCoord.xy)*dt;
-  vec3 L=uLightDir;
-  float ph=0.45+1.6*pow(max(dot(rd,-L),0.0),3.0);
   vec3 mid=ro+rd*(len*0.5);
-  vec3 c0=sampleCaustic(mid.xz-L.xz*(mid.y/L.y),2.5);
+  float ph=0.45+1.6*pow(max(dot(rd,-L),0.0),3.0);
+  // shadow space: where the light ray through the point lands on the light map plane (y = 0)
+  vec3 c0=sampleCaustic(shadowXZ(mid),2.5);
   if(c0.r+c0.g+c0.b<0.01)return vec3(0.0);
   vec3 acc=vec3(0.0);
   float T=1.0;
@@ -362,8 +430,7 @@ vec3 integrateVolume(vec3 ro,vec3 rd,float len){
     if(dc<1.32&&sdCube(q)<0.0)continue;
     dc=dot(q-uPrismPos,q-uPrismPos);
     if(dc<0.7&&sdPrism(q)<0.0)continue;
-    vec2 fxz=q.xz-L.xz*(q.y/L.y);
-    vec3 Lc=sampleCaustic(fxz,1.5);
+    vec3 Lc=sampleCaustic(shadowXZ(q),1.5);
     vec3 sw=vec3(0.006*sin(uTime*0.4+q.y*1.3),0.0,0.006*cos(uTime*0.33+q.x*1.1));
     float dust=texture(uDust,q/6.0+drift+sw).r;
     float sc=uScatter*0.25+dust*uDustGain;
@@ -391,7 +458,7 @@ float tracePath(vec3 ro,vec3 rd){
     if(!ok&&r.wallD>0.0){ok=intersect(r.ro+r.rd*0.012,r.rd,r.med,steps,eps,h);if(ok)h.t+=0.012;}
     if(!ok)ok=intersect(r.ro,r.rd,r.med,steps,eps,h);
     if(!ok){
-      acc+=r.w*r.T*envc(r.rd)*mediumTint(r.med);
+      acc+=r.w*r.T*envc(r.ro,r.rd)*mediumTint(r.med);
     }else{
       // the beam volume (green path only): first water segment of the main refracted ray
       if(volP&&r.primary==1&&r.med==M_WATER){gVolRo=r.ro;gVolRd=r.rd;gVolLen=h.t;gVolT=r.T*r.w;volP=false;}
@@ -406,14 +473,14 @@ float tracePath(vec3 ro,vec3 rd){
           if(r.depth<3&&sp<3&&it<15){
             Ray s;s.ro=h.p+n*0.006+rdir*0.006;s.rd=rdir;s.wallN=vec3(0.0,1.0,0.0);s.med=M_AIR;s.T=r.T;s.w=r.w*rw;s.depth=r.depth+1;s.primary=0;s.wallD=-1.0;
             stk[sp++]=s;
-          }else acc+=r.w*r.T*rw*pick(env(rdir));
+          }else acc+=r.w*r.T*rw*pick(env(h.p,rdir));
         }
       }else{
         float refrW=(1.0-h.F)*step(0.5,dot(h.refr,h.refr));
         float reflW=h.F;
         vec3 rdir=reflect(r.rd,h.n);
         bool hero=h.id==ID_CUBE||h.id==ID_PRISM||h.id==ID_WATER||h.id==ID_BUBBLE;
-        vec3 er=env(rdir);
+        vec3 er=env(h.p,rdir);
         float eb=max(max(er.r,er.g),er.b);
         float thr=r.depth==0?0.02:(r.depth==1?0.15:((hero&&r.depth<5)?0.12:9.0));
         bool want=reflW*r.w>thr;
@@ -459,7 +526,7 @@ void main(){
 // ================================================================== GLSL: photon caustic splat (traced in the vertex stage)
 const PHOTON = SDF + `
 uniform int uGridX,uGridY;
-uniform float uFrame,uGain,uPointSize;
+uniform float uFrame,uGain,uPointSize,uKeep;
 out vec3 vCol;
 void main(){
   vCol=vec3(0.0);gl_Position=vec4(2.0,2.0,2.0,1.0);gl_PointSize=0.0;
@@ -468,23 +535,30 @@ void main(){
   int pi=idx/3;
   int ci=pi-(pi/uGridX)*uGridX;
   int cj=pi/uGridX;
+  // thinning: every photon is used, so trace only the fraction that keeps the light map at the photon
+  // density it was designed for, whatever the beam's size (survivors carry the weight of the rest)
+  if(hash12(vec2(float(ci)*0.37+float(cj)*1.21,uFrame*0.77+3.1))>uKeep)return;
   vec2 h=hash22(vec2(float(ci),float(cj))+vec2(uFrame*0.731,uFrame*1.217));
   vec2 u=(vec2(float(ci),float(cj))+h)/vec2(float(uGridX),float(uGridY));
-  vec3 L=uLightDir;
-  vec3 t1=normalize(cross(L,vec3(0.0,0.0,1.0)));
-  vec3 t2=cross(L,t1);
-  float a=0.03*sqrt(hash12(vec2(float(ci)*1.3+float(cj)*0.7,uFrame+7.0)));
-  float b=6.2831853*hash12(vec2(float(ci)*0.9+float(cj)*1.7,uFrame+11.0));
-  vec3 rd=-normalize(L+(t1*cos(b)+t2*sin(b))*a);
-  // spawn on the light's side of the tank, in a plane perpendicular to the beam, travelling along -L
-  vec3 ro=vec3(0.0,1.8,0.0)+L*6.0+(u.x-0.5)*5.8*t1+(u.y-0.5)*3.6*t2;
-  // spotlight pool: photons are weighted by where they cross the objects' plane
-  vec2 sq=(ro.xz+rd.xz*((SPOT_Y-ro.y)/rd.y))/SPOT_R;
-  float spot=1.0-smoothstep(0.7,1.0,dot(sq,sq));
+  // Every photon is aimed at a uniform point of the beam's cross-section on the aim plane (so none is
+  // wasted). It starts at the matching point of the lens - the whole cross-section while the beam is
+  // collimated, shrinking to the bulb itself as the beam turns into a cone - and travels straight.
+  float r=sqrt(u.x),b=6.2831853*u.y;
+  vec3 off=uLightT1*(uLightFoot.x*cos(b))+uLightT2*(uLightFoot.y*sin(b));
+  vec3 ro=uLightPos+off*(r*uLightLens);
+  float spot=1.0-smoothstep(0.7,1.0,r);
   if(spot<0.004)return;
-  gCh=ch;
+  // finite source: a small angular jitter gives the shadow edges their softness
+  float a=0.03*sqrt(hash12(vec2(float(ci)*1.3+float(cj)*0.7,uFrame+7.0)));
+  b=6.2831853*hash12(vec2(float(ci)*0.9+float(cj)*1.7,uFrame+11.0));
+  vec3 dir=-uLightDir*uLightDist+off*(r*(1.0-uLightLens));
+  vec3 rd=normalize(dir/max(length(dir),1e-5)+(uLightT1*cos(b)+uLightT2*sin(b))*a);
+  // the fixture may sit inside the tank: start in whatever medium that is (air, water, glass)
   int med=M_AIR;
-  float w=spot;
+  if(ro.y<3.6&&abs(ro.x)<3.2&&abs(ro.z)<2.0)med=mediumAt(ro);
+  int med0=med;
+  gCh=ch;
+  float w=spot/uKeep;
   bool landed=false,passed=false;
   vec3 land=vec3(0.0);
   vec3 wallN=vec3(0.0,1.0,0.0);
@@ -507,7 +581,8 @@ void main(){
     }else{w*=hh.F;rd=reflect(rd,hh.n);ro=hh.p+hh.n*0.006+rd*0.006;wallD=-1.0;}
     if(w<0.01)break;
   }
-  if(landed&&passed&&abs(land.x)<6.0&&abs(land.z)<6.0&&land.y<1.3){
+  // light that reached an opaque surface after crossing glass/water (or that started inside the tank)
+  if(landed&&(passed||med0!=M_AIR)&&abs(land.x)<6.0&&abs(land.z)<6.0&&land.y<1.3){
     float lum=dot(uLightCol,vec3(0.2126,0.7152,0.0722));
     float lc=(ch==0?uLightCol.r:(ch==1?uLightCol.g:uLightCol.b))/max(lum,1e-4);
     vCol=lc*w*uGain*(ch==0?vec3(1.0,0.0,0.0):(ch==1?vec3(0.0,1.0,0.0):vec3(0.0,0.0,1.0)));
@@ -679,7 +754,9 @@ function makeDust(N) {
 }
 
 // ================================================================== scene constants / state
-const CS = 768, CEXT = 12.0, PTS = 7.0, SPAWN_AREA = 5.8 * 3.6;
+// PHOTON_AREA: area of the beam cross-section over which the full photon grid gives the light map the
+// photon density it was designed for
+const CS = 768, CEXT = 12.0, PTS = 7.0, PHOTON_AREA = 5.8 * 3.6;
 const KERNEL_AREA = 0.82 * (PTS * 0.5) * (PTS * 0.5) * (CEXT / CS) * (CEXT / CS);
 const causSplat = makeTarget(CS, CS, true, false), caus = [makeTarget(CS, CS, true, true), makeTarget(CS, CS, true, true)];
 let causIdx = 0;
@@ -722,50 +799,155 @@ const PRESETS = [
     envAdir: [-0.9, 0.2, 0.3], envA: [0.28, 0.16, 0.64], envBdir: [0.3, 0.8, -0.6], envB: [0.85, 0.55, 0.30],
     abs: [0.05, 0.05, 0.09], exp: 1.2, bloom: 0.45, thr: 1.0, scat: 0.12, dust: 30.0, tab: 0.14 },
 ];
-const VECS = ['dir', 'col', 'amb', 'bgTop', 'bgBot', 'envAdir', 'envA', 'envBdir', 'envB', 'abs'];
-const SCALARS = ['softbox', 'exp', 'bloom', 'thr', 'scat', 'dust', 'tab'];
 const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; v[0] /= l; v[1] /= l; v[2] /= l; return v; };
-const cur = JSON.parse(JSON.stringify(PRESETS[0]));
-let target = PRESETS[0], causAlpha = 0.1, presetAt = -100;
+const clampf = (x, a, b) => Math.min(b, Math.max(a, x));
+for (const p of PRESETS) {
+  // default angle of the fixture; along-beam half-width of its pool (the presets share one ellipse on
+  // the horizontal plane, so a flatter light gets a slimmer beam)
+  const d = norm(p.dir.slice());
+  p.lightAz = Math.atan2(d[0], d[2]); p.lightEl = Math.asin(clampf(d[1], -1, 1)); p.footA = 2.5 * d[1];
+}
+const VECS = ['col', 'amb', 'bgTop', 'bgBot', 'envAdir', 'envA', 'envBdir', 'envB', 'abs'];
+const SCALARS = ['softbox', 'exp', 'bloom', 'thr', 'scat', 'dust', 'tab'];
+const cur = {};
+for (const f of VECS) cur[f] = PRESETS[0][f].slice();
+for (const f of SCALARS) cur[f] = PRESETS[0][f];
+let target = PRESETS[0], causAlpha = 0.1, presetAt = -100, presetIdx = 0;
 function setPreset(i) {
-  target = PRESETS[i];
-  presetAt = perf();
+  target = PRESETS[i]; presetIdx = i;
+  presetAt = lightAt = perf();
+  // every preset has its own default light angle; the distance stays where the user put it
+  lightT.az = wrap(PRESETS[i].lightAz); lightT.el = PRESETS[i].lightEl; lightT.a = PRESETS[i].footA;
   flash(target.name);
 }
 function lerpPreset(dt) {
   const k = 1 - Math.exp(-dt * 5);
   for (const f of VECS) { const a = cur[f], b = target[f]; for (let i = 0; i < 3; i++) a[i] += (b[i] - a[i]) * k; }
   for (const f of SCALARS) cur[f] += (target[f] - cur[f]) * k;
-  norm(cur.dir); norm(cur.envAdir); norm(cur.envBdir);
-  causAlpha = 0.1 + 0.45 * Math.exp(-(perf() - presetAt) * 2.5);
+  norm(cur.envAdir); norm(cur.envBdir);
+  // the light map is re-traced faster while a preset blends in or the fixture is being moved
+  causAlpha = 0.1 + 0.45 * Math.max(Math.exp(-(perf() - presetAt) * 2.5), lightHot);
 }
 
-// ================================================================== camera / input
+// ================================================================== movable spotlight
+// The fixture orbits AIM in az / el / distance and always aims at it. Far away it is a follow spot: a
+// collimated beam (the same parallel rays and crisp caustics as before) whose elliptical cross-section
+// covers both crystals from every azimuth. Brought up to the tank (shift + wheel) its lens shrinks and
+// the beam turns into a cone from the bulb itself, so the fixture can be moved in through the glass and
+// light the water from inside.
+const AIM = [0, 1.5, 0];
+const LIGHT_DIST0 = 8.0, LIGHT_DIST_MIN = 0.3, LIGHT_DIST_MAX = 14.0;
+const LIGHT_EL_MIN = 0.36, LIGHT_EL_MAX = 1.52, LIGHT_SENS = 0.0065;
+const FOOT_B = 1.8, FOOT_A_MIN = 2.0;
+const wrap = (a) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+const smooth01 = (x) => { x = clampf(x, 0, 1); return x * x * (3 - 2 * x); };
+const light = { az: PRESETS[0].lightAz, el: PRESETS[0].lightEl, dist: LIGHT_DIST0, a: PRESETS[0].footA };  // drawn (eased)
+const lightT = { az: light.az, el: light.el, dist: light.dist, a: light.a };                               // driven by input
+const lightDir = [0, 0, 0], lightPos = [0, 0, 0], lightT1 = [0, 0, 0], lightT2 = [0, 0, 0], lightFoot = [0, 0];
+const lightApex = [0, 0, 0], lightConeP = [0, 0];
+let lightLens = 1, lightCone = 0, softboxW = 1, lightActive = false, lightHot = 0, lightAt = -100, bulb = 9;
+const lightDefault = (i) => { const p = PRESETS[i]; return { az: wrap(p.lightAz), el: p.lightEl, dist: LIGHT_DIST0, a: p.footA }; };
+function updateLight(dt) {
+  const now = perf();
+  const k = 1 - Math.exp(-dt * 16);
+  const dAz = wrap(lightT.az - light.az), dEl = lightT.el - light.el;
+  const dD = (lightT.dist - light.dist) / light.dist, dA = (lightT.a - light.a) / light.a;
+  light.az = wrap(light.az + dAz * k); light.el += dEl * k; light.dist *= 1 + dD * k; light.a *= 1 + dA * k;
+  // "moving" = the input touched it just now, or the easing has not settled yet
+  lightActive = now - lightAt < 0.2 || Math.abs(dAz) + Math.abs(dEl) + Math.abs(dD) + Math.abs(dA) > 0.003;
+  lightHot = lightActive ? 1 : Math.exp(-(now - lightAt - 0.2) * 6);
+  bulb += ((lightActive ? 16 : 9) - bulb) * (1 - Math.exp(-dt * 8));
+  // beam direction (scene -> fixture), fixture position, and the beam frame: t2 across the beam
+  // (horizontal), t1 in the vertical plane
+  const ce = Math.cos(light.el), se = Math.sin(light.el), sx = Math.sin(light.az), cx = Math.cos(light.az);
+  lightDir[0] = ce * sx; lightDir[1] = se; lightDir[2] = ce * cx;
+  lightPos[0] = AIM[0] + light.dist * lightDir[0]; lightPos[1] = AIM[1] + light.dist * lightDir[1]; lightPos[2] = AIM[2] + light.dist * lightDir[2];
+  lightT2[0] = -cx; lightT2[1] = 0; lightT2[2] = sx;
+  lightT1[0] = -se * sx; lightT1[1] = ce; lightT1[2] = -se * cx;
+  // cross-section: the preset's ellipse, never shorter along the beam than the tank's contents need
+  lightFoot[0] = Math.max(light.a, FOOT_A_MIN * se); lightFoot[1] = FOOT_B;
+  // Far from the tank the beam is collimated. Closing in (3 .. 7 units) its lens shrinks and it turns
+  // into a cone from the bulb: all rays then share a virtual apex behind the fixture. The distant
+  // softbox gives way to that bare bulb over the same range.
+  lightLens = smooth01((light.dist - 3) / 4);
+  lightCone = lightLens < 0.995 ? 1 : 0;
+  const m = lightCone ? light.dist * lightLens / (1 - lightLens) : 0;
+  lightApex[0] = lightPos[0] + m * lightDir[0]; lightApex[1] = lightPos[1] + m * lightDir[1]; lightApex[2] = lightPos[2] + m * lightDir[2];
+  lightConeP[0] = m; lightConeP[1] = light.dist + m;
+  softboxW = lightLens;
+}
+
+// ================================================================== camera / light input
 const perf = () => performance.now() / 1000;
 const TARGET = [0, 1.5, 0];
-let yaw = 0.55, pitch = 0.30, dist = 11.5, autoW = 1, lastAct = -100, dragging = false, lx = 0, ly = 0;
+let yaw = 0.55, pitch = 0.30, dist = 11.5, autoW = 1, lastAct = -100;
 let paused = false, simTime = 0, frameNo = 0, lastNow = 0;
+// Left drag orbits the camera. The spotlight is moved by right drag, shift + left drag, or left drag
+// while "move light" is on (key L); a second pointer (touch) always moves the light.
+let moveMode = false, lightDragging = false;
+const pointers = new Map();
 const act = () => { lastAct = perf(); };
-canvas.addEventListener('pointerdown', (e) => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); canvas.classList.add('drag'); act(); });
-canvas.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-  yaw -= (e.clientX - lx) * 0.006;
-  pitch = Math.min(1.25, Math.max(0.06, pitch + (e.clientY - ly) * 0.006));
-  lx = e.clientX; ly = e.clientY; act();
+function dragLight(dx, dy) {
+  // sideways: push the fixture the way the pointer goes on screen (its orbit is seen from the camera);
+  // vertically: lower / raise it around the tank
+  lightT.az = wrap(lightT.az + dx * LIGHT_SENS * (Math.cos(lightT.az - yaw) >= 0 ? 1 : -1));
+  lightT.el = clampf(lightT.el - dy * LIGHT_SENS, LIGHT_EL_MIN, LIGHT_EL_MAX);
+  lightAt = perf();
+}
+canvas.addEventListener('pointerdown', (e) => {
+  let mode;
+  if (pointers.size === 0) mode = (e.button === 2 || (e.button === 0 && (e.shiftKey || moveMode))) ? 'light' : 'cam';
+  else mode = pointers.values().next().value.mode === 'light' ? 'cam' : 'light';
+  pointers.set(e.pointerId, { mode, x: e.clientX, y: e.clientY });
+  lightDragging = [...pointers.values()].some((p) => p.mode === 'light');
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('drag'); canvas.classList.toggle('aim', lightDragging);
+  act();
 });
-const endDrag = () => { dragging = false; canvas.classList.remove('drag'); };
+canvas.addEventListener('pointermove', (e) => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX; p.y = e.clientY; act();
+  if (p.mode === 'light') dragLight(dx, dy);
+  else {
+    yaw -= dx * 0.006;
+    pitch = Math.min(1.25, Math.max(0.06, pitch + dy * 0.006));
+  }
+});
+const endDrag = (e) => {
+  if (!pointers.delete(e.pointerId)) return;
+  lightDragging = [...pointers.values()].some((p) => p.mode === 'light');
+  canvas.classList.toggle('aim', lightDragging);
+  if (pointers.size === 0) canvas.classList.remove('drag');
+};
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); dist = Math.min(17, Math.max(6, dist * Math.exp(e.deltaY * 0.0012))); act(); }, { passive: false });
-let flashTimer = 0;
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  // shift + wheel: fixture distance (some browsers hand a shift-scrolled wheel over as deltaX)
+  const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+  if (e.shiftKey) { lightT.dist = clampf(lightT.dist * Math.exp(d * 0.002), LIGHT_DIST_MIN, LIGHT_DIST_MAX); lightAt = perf(); }
+  else dist = Math.min(17, Math.max(6, dist * Math.exp(e.deltaY * 0.0012)));
+  act();
+}, { passive: false });
+let flashTimer = 0, restoreTimer = 0;
 function flash(text) {
   hint.textContent = text; hint.classList.add('show');
-  clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { hint.classList.remove('show'); setTimeout(() => { hint.textContent = HINT_TEXT; }, 1700); }, 1500);
+  clearTimeout(flashTimer); clearTimeout(restoreTimer);
+  flashTimer = setTimeout(() => { hint.classList.remove('show'); restoreTimer = setTimeout(() => { hint.innerHTML = HINT_HTML; }, 1700); }, 1500);
 }
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); paused = !paused; flash(paused ? 'paused' : 'playing'); }
   else if (e.key === '1' || e.key === '2' || e.key === '3') setPreset(+e.key - 1);
+  else if ((e.key === 'l' || e.key === 'L') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    moveMode = !moveMode;
+    canvas.classList.toggle('move', moveMode); modeTag.classList.toggle('show', moveMode);
+    flash(moveMode ? 'move light · on · drag to aim · shift+wheel · distance' : 'move light · off');
+  } else if ((e.key === 'r' || e.key === 'R') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    Object.assign(lightT, lightDefault(presetIdx)); lightAt = perf(); flash('light reset');
+  }
 });
 window.addEventListener('resize', resize);
 hint.classList.add('show');
@@ -808,9 +990,21 @@ function updateCamera(dt, dts) {
 }
 
 // ================================================================== drawing helpers
-function setCommon(u, t) {
+// Scene state shared by every program. bulbSolid: should this program see the emitter bulb as geometry?
+// (the photon pass must not - the bulb cannot shadow its own beam)
+function setCommon(u, t, bulbSolid) {
   if (u.uTime) gl.uniform1f(u.uTime, t);
-  if (u.uLightDir) gl.uniform3fv(u.uLightDir, cur.dir);
+  if (u.uLightDir) gl.uniform3fv(u.uLightDir, lightDir);
+  if (u.uLightPos) gl.uniform3fv(u.uLightPos, lightPos);
+  if (u.uLightT1) gl.uniform3fv(u.uLightT1, lightT1);
+  if (u.uLightT2) gl.uniform3fv(u.uLightT2, lightT2);
+  if (u.uLightFoot) gl.uniform2fv(u.uLightFoot, lightFoot);
+  if (u.uLightDist) gl.uniform1f(u.uLightDist, light.dist);
+  if (u.uLightLens) gl.uniform1f(u.uLightLens, lightLens);
+  if (u.uLightApex) gl.uniform3fv(u.uLightApex, lightApex);
+  if (u.uLightConeP) gl.uniform2fv(u.uLightConeP, lightConeP);
+  if (u.uLightCone) gl.uniform1f(u.uLightCone, lightCone);
+  if (u.uBulbSolid) gl.uniform1f(u.uBulbSolid, bulbSolid);
   if (u.uLightCol) gl.uniform3fv(u.uLightCol, cur.col);
   if (u.uWaterAbs) gl.uniform3fv(u.uWaterAbs, cur.abs);
   if (u.uCubeM) gl.uniformMatrix3fv(u.uCubeM, false, cubeM);
@@ -824,13 +1018,19 @@ function draw(t) { gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fb : null); gl.viewp
 function renderCaustics(t) {
   const gx = 400, gy = Math.max(70, Math.round(300 * Math.min(1, scale * 1.2)));
   const lum = 0.2126 * cur.col[0] + 0.7152 * cur.col[1] + 0.0722 * cur.col[2];
-  const gain = lum * cur.dir[1] / ((gx * gy) / SPAWN_AREA * KERNEL_AREA) / CAUSTIC_SCALE;
+  // photons are uniform over the beam's cross-section; normalise by their density there. Only the
+  // fraction that keeps that density at the level the light map was tuned for is traced, so the cost
+  // follows the beam's area rather than the grid (a beam of the original size costs what it used to).
+  const density = (gx * gy) / (Math.PI * lightFoot[0] * lightFoot[1]);
+  const gain = lum * Math.sin(light.el) / (density * KERNEL_AREA) / CAUSTIC_SCALE;
+  const keep = Math.min(1, (Math.PI * lightFoot[0] * lightFoot[1]) / PHOTON_AREA);
   gl.disable(gl.BLEND);
   gl.bindFramebuffer(gl.FRAMEBUFFER, causSplat.fb); gl.viewport(0, 0, CS, CS);
   gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.useProgram(photon.p); setCommon(photon.u, t);
+  gl.useProgram(photon.p); setCommon(photon.u, t, 0);
   gl.uniform1i(photon.u.uGridX, gx); gl.uniform1i(photon.u.uGridY, gy);
   gl.uniform1f(photon.u.uFrame, frameNo % 64); gl.uniform1f(photon.u.uGain, gain); gl.uniform1f(photon.u.uPointSize, PTS);
+  gl.uniform1f(photon.u.uKeep, keep);
   gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
   gl.bindVertexArray(vao); gl.drawArrays(gl.POINTS, 0, gx * gy * 3);
   gl.disable(gl.BLEND);
@@ -848,10 +1048,11 @@ function renderFrame(now) {
   const t = simTime;
   cubeM = transpose(axisAngle(0.267, 0.935, 0.235, t * 0.33));
   prismM = transpose(mul3(basisFromZ(0.85, 0.3, 0.45), axisAngle(0, 0, 1, t * 0.27)));
-  // while paused the light map is frozen too (only re-traced while a preset is still blending in)
-  if (!paused || perf() - presetAt < 1.5) renderCaustics(t);
+  // while paused the light map is frozen too (only re-traced while a preset is still blending in or
+  // the spotlight is being moved)
+  if (!paused || perf() - presetAt < 1.5 || lightHot > 0.02) renderCaustics(t);
 
-  gl.useProgram(scene.p); setCommon(scene.u, t);
+  gl.useProgram(scene.p); setCommon(scene.u, t, 1);
   const u = scene.u;
   gl.uniform3fv(u.uCamPos, camPos); gl.uniform3fv(u.uCamRight, camRight); gl.uniform3fv(u.uCamUp, camUp); gl.uniform3fv(u.uCamFwd, camFwd);
   gl.uniform1f(u.uFl, 1.85); gl.uniform2f(u.uRes, W, H);
@@ -859,6 +1060,7 @@ function renderFrame(now) {
   gl.uniform3fv(u.uEnvADir, cur.envAdir); gl.uniform3fv(u.uEnvACol, cur.envA); gl.uniform3fv(u.uEnvBDir, cur.envBdir); gl.uniform3fv(u.uEnvBCol, cur.envB);
   gl.uniform1f(u.uSoftbox, cur.softbox); gl.uniform1f(u.uScatter, cur.scat); gl.uniform1f(u.uTableAlb, cur.tab);
   gl.uniform1f(u.uCausticScale, CAUSTIC_SCALE); gl.uniform1f(u.uDustGain, cur.dust);
+  gl.uniform1f(u.uBulb, bulb); gl.uniform1f(u.uSoftboxW, softboxW);
   bindTex(0, gl.TEXTURE_2D, caus[causIdx].tex); gl.uniform1i(u.uCaustic, 0);
   bindTex(1, gl.TEXTURE_3D, dustTex); gl.uniform1i(u.uDust, 1);
   draw(fbScene);
@@ -916,6 +1118,7 @@ function frame(now) {
   simTime += dts;
   frameNo++;
   updateCamera(dt, dts);
+  updateLight(dt);
   lerpPreset(dt);
   adapt(dt, now / 1000);
   renderFrame(now);
@@ -923,6 +1126,7 @@ function frame(now) {
 // warm up the light map so the caustics are present from the first visible frame
 cubeM = transpose(axisAngle(0.267, 0.935, 0.235, 0));
 prismM = transpose(mul3(basisFromZ(0.85, 0.3, 0.45), axisAngle(0, 0, 1, 0)));
+updateLight(0);
 for (let i = 0; i < 24; i++) { causAlpha = i < 6 ? 0.5 : 0.2; renderCaustics(0); frameNo++; }
 causAlpha = 0.1;
 requestAnimationFrame(frame);

@@ -5,7 +5,7 @@
   "model": "Factory Droid",
   "version": "November 2026",
   "summary": "A real-time WebGL2 optical aquarium with raymarched dispersion, a 360k-photon caustic light map, and a volumetric spotlight beam.",
-  "description": "A single-file WebGL2 optical scene with zero external assets. Raymarches a glass tank, rippling water surface, rising bubbles, rotating glass cube, and crystal prism per spectral R/G/B channel for chromatic dispersion, paired with a 360,000-photon caustic light map, volumetric spotlight shaft with drifting dust motes, and ACES bloom. Drag to orbit (35s auto-orbit when idle), scroll to zoom, press 1–3 to switch lighting presets (Studio Light, Neon Night, Ember Dusk), and press Space to pause.",
+  "description": "A single-file WebGL2 optical scene with zero external assets. Raymarches a glass tank, rippling water surface, rising bubbles, rotating glass cube, and crystal prism per spectral R/G/B channel for chromatic dispersion, paired with a 360,000-photon caustic light map, volumetric spotlight shaft with drifting dust motes, and ACES bloom. Drag to orbit (35s auto-orbit when idle), scroll to zoom, Shift+drag / right-drag / L to move the spotlight (Shift+wheel to bring it into the tank, R to reset), press 1–3 for lighting presets (Studio Light, Neon Night, Ember Dusk), and Space to pause.",
   "accent": "#6838ff",
   "tags": [
     "WebGL2",
