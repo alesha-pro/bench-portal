@@ -1,0 +1,18 @@
+{
+  "slug": "neon-hourglass-factory",
+  "title": "Neon Hourglass",
+  "category": "visuals",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "A raymarched WebGL2 hand-blown glass hourglass with brushed-brass pillars, a bioluminescent sand stream, and colored stone reflections.",
+  "description": "A single-file WebGL2 SDF raymarching scene depicting a hand-blown glass hourglass framed by brushed-brass pillars and caps, a glowing bioluminescent sand stream feeding a growing lower cone, and colored reflections across a dark stone floor. Drag to orbit, wheel to zoom, press 1–3 for sand palettes, R for a 180-degree flip, Right Drag / Shift+Drag / L for the rim light, and Space to pause.",
+  "accent": "#ff6e1e",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "SDF",
+    "Particles"
+  ],
+  "cover": "cover.webp"
+}

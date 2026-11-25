@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEON HOURGLASS</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080b10;color:#d9d9d2;font-family:Arial,Helvetica,sans-serif}canvas{display:block;width:100%;height:100%;touch-action:none}#title{position:fixed;top:28px;left:34px;font-size:11px;letter-spacing:.36em;font-weight:600;color:#d9d3c3;text-shadow:0 0 15px #d6964766;pointer-events:none}#hint{position:fixed;left:0;right:0;bottom:22px;text-align:center;font-size:10px;letter-spacing:.12em;color:#d2d3d4a8;text-shadow:0 1px 8px #000;pointer-events:none;opacity:1;transition:opacity 1.2s ease}#hint.fade{opacity:0}
+</style>
+</head>
+<body>
+<div id="title">NEON HOURGLASS</div>
+<canvas id="scene" aria-label="A glowing hourglass in a dark studio"></canvas>
+<div id="hint">DRAG TO ORBIT · WHEEL TO ZOOM · 1 / 2 / 3 PALETTE · R FLIP · SPACE PAUSE · L LIGHT</div>
+<script>
+(() => {
+  "use strict";
+  const canvas = document.getElementById("scene");
+  const gl = canvas.getContext("webgl2", { alpha:false, antialias:false, depth:false, stencil:false, powerPreference:"high-performance" });
+  if (!gl) { document.getElementById("hint").textContent = "WEBGL 2 REQUIRED"; return; }
+
+  const vertexSource = `#version 300 es
+  precision highp float;
+  const vec2 P[3]=vec2[3](vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));
+  out vec2 vUv;
+  void main(){ vec2 p=P[gl_VertexID]; vUv=p*.5+.5; gl_Position=vec4(p,0.,1.); }`;
+  const fragmentSource = `#version 300 es
+  precision highp float;
+  in vec2 vUv;
+  out vec4 outColor;
+  uniform vec2 u_resolution;
+  uniform float u_time,u_yaw,u_pitch,u_distance,u_flip,u_fill,u_lightOn;
+  uniform vec3 u_light,u_palette;
+  const float PI=3.14159265359;
+  float sdCappedCylinder(vec3 p,float h,float r){vec2 d=abs(vec2(length(p.xz),p.y))-vec2(r,h);return min(max(d.x,d.y),0.)+length(max(d,0.));}
+  float glassRadius(float y){
+    float h=clamp(abs(y)/1.83,0.,1.);
+    float bulb=1.-exp(-pow(h*2.35,2.));
+    return .155+.66*bulb+.075*smoothstep(.56,1.,h);
+  }
+  vec3 toWorld(vec3 p){float a=u_flip*PI;return vec3(cos(a)*p.x-sin(a)*p.y,sin(a)*p.x+cos(a)*p.y,p.z);}
+  vec2 mapScene(vec3 p){
+    float d=100.;float id=0.;
+    float glass=abs(length(p.xz)-glassRadius(p.y))-.024;
+    glass=max(glass,abs(p.y)-1.83);
+    if(glass<d){d=glass;id=1.;}
+    for(int i=0;i<4;i++){
+      float a=float(i)*1.5707963+.785398;
+      vec2 q=vec2(p.x,p.z)-vec2(cos(a),sin(a))*.91;
+      float rod=max(length(q)-.028,abs(p.y)-1.985);
+      if(rod<d){d=rod;id=2.;}
+    }
+    float capTop=sdCappedCylinder(p-vec3(0.,1.91,0.),.08,.96);
+    float capBot=sdCappedCylinder(p-vec3(0.,-1.91,0.),.08,.96);
+    if(capTop<d){d=capTop;id=3.;} if(capBot<d){d=capBot;id=3.;}
+    float h=max(.30,u_fill*1.42);
+    float y0=-1.76,yt=y0+h;
+    float radius=.80*clamp((yt-p.y)/h,0.,1.)+.018;
+    float lowerSand=max(length(p.xz)-radius,max(y0-p.y,p.y-yt));
+    float upperBottom=.12,upperTop=1.48-u_fill*.24;
+    float upperRadius=.69*clamp((p.y-upperBottom)/(upperTop-upperBottom),0.,1.)+.018;
+    float upperSand=max(length(p.xz)-upperRadius,max(upperBottom-p.y,p.y-upperTop));
+    float sand=min(lowerSand,upperSand);
+    if(sand<d){d=sand;id=4.;}
+    float floorD=toWorld(p).y+2.105;
+    if(floorD<d){d=floorD;id=5.;}
+    return vec2(d,id);
+  }
+  vec3 getNormal(vec3 p){vec2 e=vec2(.0015,0.);return normalize(vec3(mapScene(p+e.xyy).x-mapScene(p-e.xyy).x,mapScene(p+e.yxy).x-mapScene(p-e.yxy).x,mapScene(p+e.yyx).x-mapScene(p-e.yyx).x));}
+  vec3 filmic(vec3 x){x=max(vec3(0.),x-.004);return clamp((x*(6.2*x+.5))/(x*(6.2*x+1.7)+.06),0.,1.);}
+  vec3 background(vec3 rd){float h=max(rd.y,0.);return mix(vec3(.006,.009,.015),vec3(.024,.032,.050),pow(h,.7));}
+  vec3 shadeFloor(vec3 p,vec3 rd){
+    vec2 xz=p.xz;float radial=length(xz);
+    float grain=sin(xz.x*3.+sin(xz.y*2.))*sin(xz.y*4.)*.001;
+    float sheen=pow(max(0.,1.-radial/2.6),3.)*(.12+.12*sin(xz.x*5.+u_time*.25));
+    float reflection=exp(-abs(xz.x)*1.5)*exp(-abs(xz.y-.55)*1.8);
+    float streak=pow(max(0.,sin(xz.x*18.+xz.y*5.)),24.)*reflection*.14;
+    float mist=exp(-length(xz-vec2(0.,.10))*1.7)*(.065+.025*sin(u_time*1.2));
+    vec3 c=vec3(.019,.024,.034)+grain+vec3(.13,.095,.065)*sheen+u_palette*(.18*reflection+streak+mist);
+    vec3 n=vec3(0.,1.,0.);vec3 l=normalize(u_light-p);float spec=pow(max(dot(reflect(-l,n),normalize(-rd)),0.),42.);
+    return c+vec3(1.,.78,.51)*spec*.75;
+  }
+  vec3 seeThroughGlass(vec3 ro,vec3 rd){
+    float t=.004;
+    for(int i=0;i<80;i++){
+      vec3 p=ro+rd*t;vec2 h=mapScene(p);
+      if(h.x<.0015){
+        if(h.y<1.5){t+=.06;continue;}
+        if(h.y<2.5)return vec3(.42,.245,.105)+vec3(1.,.72,.40)*.20;
+        if(h.y<3.5)return vec3(.23,.125,.057)+vec3(1.,.79,.49)*.16;
+        if(h.y<4.5)return u_palette*(1.2+.22*sin(p.y*11.+u_time*1.5))+vec3(.16,.12,.07);
+        return shadeFloor(toWorld(p),rd);
+      }
+      t+=max(h.x*.78,.004);
+      if(t>9.)break;
+    }
+    return background(rd);
+  }
+  void main(){
+    vec2 uv=(gl_FragCoord.xy-.5*u_resolution)/u_resolution.y;
+    float cp=cos(u_pitch),sp=sin(u_pitch),cy=cos(u_yaw),sy=sin(u_yaw);
+    vec3 ro=vec3(u_distance*cp*sy, u_distance*sp, u_distance*cp*cy);
+    vec3 target=vec3(0.,-.02,0.);
+    vec3 fw=normalize(target-ro), right=normalize(cross(fw,vec3(0.,1.,0.))), up=cross(right,fw);
+    vec3 rd=normalize(fw+uv.x*right*1.05+uv.y*up*1.05);
+    float flipAngle=u_flip*PI;
+    float ca=cos(flipAngle),sa=sin(flipAngle);
+    vec3 localRo=vec3(ca*ro.x+sa*ro.y,-sa*ro.x+ca*ro.y,ro.z);
+    vec3 localRd=vec3(ca*rd.x+sa*rd.y,-sa*rd.x+ca*rd.y,rd.z);
+    vec3 localLight=vec3(ca*u_light.x+sa*u_light.y,-sa*u_light.x+ca*u_light.y,u_light.z);
+    vec3 color=background(rd);float t=0.;float mat=0.;vec3 pos=vec3(0.);
+    for(int i=0;i<128;i++){
+      pos=localRo+localRd*t;vec2 h=mapScene(pos);
+      if(h.x<.0015){mat=h.y;break;}
+      t+=max(h.x*.78,.003);
+      if(t>9.)break;
+    }
+    if(t<9.&&mat>0.){
+      vec3 worldPos=toWorld(pos);
+      vec3 n=getNormal(pos);vec3 view=normalize(-localRd);vec3 l=normalize(localLight-pos);
+      float diff=max(dot(n,l),0.);float fres=pow(1.-max(dot(n,view),0.),4.);
+      if(mat<1.5){
+        float rim=pow(1.-abs(dot(n,view)),3.2);
+        float spec=pow(max(dot(reflect(-l,n),view),0.),105.);
+        float broadSpec=pow(max(dot(reflect(-l,n),view),0.),24.);
+        float panel=pow(max(dot(n,normalize(vec3(-.65,.44,1.))),0.),34.);
+        float caustic=(.5+.5*sin(pos.y*13.+sin(pos.x*12.+u_time*1.4)*2.))*exp(-abs(pos.y)*.42);
+        float innerGlow=exp(-abs(pos.y-1.18)*2.1)+exp(-abs(pos.y+.98)*2.4);
+        vec3 transmitted=u_palette*(.28+.34*caustic+.12*innerGlow)+vec3(.065,.09,.11);
+        vec3 reflection=vec3(.78,.91,1.)*(rim*.78+panel*.36)+vec3(1.,.84,.62)*(spec*1.45+broadSpec*.18);
+        vec3 glass=transmitted+reflection;
+        float alpha=clamp(.018+rim*.37+spec*.30+broadSpec*.065,.018,.70);
+        vec3 through=seeThroughGlass(localRo+localRd*(t+.055),localRd);
+        color=mix(through,glass,alpha);
+      }else if(mat<2.5){
+        float spec=pow(max(dot(reflect(-l,n),view),0.),46.);
+        color=vec3(.42,.245,.105)*( .55+.45*diff)+vec3(1.,.72,.40)*spec*.8;
+      }else if(mat<3.5){
+        float spec=pow(max(dot(reflect(-l,n),view),0.),64.);
+        float brush=.94+.06*sin((abs(n.y)>.5?pos.x:pos.y)*210.);
+        float edge=pow(1.-abs(n.y),7.);
+        color=vec3(.23,.125,.057)*brush+vec3(1.,.79,.49)*(spec*.72+edge*.24);
+      }else if(mat<4.5){
+        float grain=.86+.14*sin(pos.x*84.+sin(pos.z*79.)*2.)*sin(pos.y*91.);
+        float glow=.34+.18*sin(pos.y*10.+u_time*1.7);
+        color=(u_palette*(.82+.38*diff)+vec3(.14,.105,.06))*grain+u_palette*glow*.75;
+      }else{
+        color=shadeFloor(worldPos,rd);
+      }
+      float spot=pow(max(dot(normalize(localLight-pos),-localRd),0.),20.)*u_lightOn;
+      color+=u_palette*spot*.22;
+    }
+    // Subtle atmospheric halo and filmic highlight roll-off.
+    float halo=exp(-length(uv-vec2(.0,-.04))*2.8)*.045;
+    color+=u_palette*halo;
+    color=filmic(color*1.52);
+    // Lightweight two-tap bloom approximation; bright accents stay soft, not clipped.
+    float lum=max(max(color.r,color.g),color.b);
+    color+=u_palette*max(lum-.48,0.)*.22;
+    outColor=vec4(color,1.);
+  }`;
+  const particleVertex = `#version 300 es
+  precision highp float;
+  layout(location=0) in vec3 a_pos;
+  layout(location=1) in float a_seed;
+  uniform vec2 u_resolution;
+  uniform float u_time,u_yaw,u_pitch,u_distance,u_flip,u_paused,u_fill;
+  uniform vec3 u_palette;
+  out vec3 v_color;out float v_alpha;
+  void main(){
+    float t=u_time;
+    vec3 p=a_pos;
+    // Small orbiting drift keeps the glowing grains alive without jitter.
+    float seed=a_seed>1.?a_seed-1.:a_seed;
+    if(a_seed<.62){float h=clamp((p.y+1.72)/.90,0.,1.);p.y=-1.72+(.12+u_fill*1.28)*h;p.xz*=1.-h*.12;}
+    p.x+=sin(t*1.7+seed*21.)*.009;
+    p.z+=cos(t*1.3+seed*17.)*.009;
+    if(a_seed>1.)p.y=1.33-mod(t*.55+seed*2.65,2.65);
+    float ca=cos(u_flip*3.14159265),sa=sin(u_flip*3.14159265);
+    p=vec3(ca*p.x-sa*p.y,sa*p.x+ca*p.y,p.z);
+    float cp=cos(u_pitch),sp=sin(u_pitch),cy=cos(u_yaw),sy=sin(u_yaw);
+    vec3 ro=vec3(u_distance*cp*sy,u_distance*sp,u_distance*cp*cy);
+    vec3 fw=normalize(vec3(0.,-.02,0.)-ro),right=normalize(cross(fw,vec3(0.,1.,0.))),up=cross(right,fw);
+    vec3 rel=p-ro;float z=dot(rel,fw);
+    float x=dot(rel,right),y=dot(rel,up);
+    float aspect=u_resolution.x/u_resolution.y;
+    float f=1.05;
+    gl_Position=vec4(x/(z*f*aspect),y/(z*f),0.,1.);
+    gl_PointSize=clamp(15.5*720./u_resolution.y/(z*.72),2.0,10.5);
+    float twinkle=.68+.32*sin(t*5.5+seed*39.);
+    v_alpha=twinkle;
+    v_color=u_palette*(.85+1.0*twinkle)+vec3(1.,.75,.40)*.55;
+  }`;
+  const particleFragment = `#version 300 es
+  precision highp float;
+  in vec3 v_color;in float v_alpha;out vec4 outColor;
+  void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;float core=exp(-r*r*8.);float halo=exp(-r*r*1.8);float a=(core*.98+halo*.38)*v_alpha;outColor=vec4(v_color*a*1.3,a);}`;
+  function shader(type, source) { const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s; }
+  function program(vs,fs){const p=gl.createProgram();gl.attachShader(p,shader(gl.VERTEX_SHADER,vs));gl.attachShader(p,shader(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;}
+  const mainProgram=program(vertexSource,fragmentSource),particleProgram=program(particleVertex,particleFragment);
+  const mainLoc={};
+  ["u_resolution","u_time","u_yaw","u_pitch","u_distance","u_flip","u_fill","u_lightOn","u_light","u_palette"].forEach(k=>mainLoc[k]=gl.getUniformLocation(mainProgram,k));
+  const partLoc={};
+  ["u_resolution","u_time","u_yaw","u_pitch","u_distance","u_flip","u_paused","u_fill","u_palette"].forEach(k=>partLoc[k]=gl.getUniformLocation(particleProgram,k));
+  const palettes=[[1.0,.43,.115],[.07,.80,1.0],[.77,.12,.68]];
+  let paletteIndex=0,yaw=.22,pitch=.14,distance=6.45,flip=0,flipFrom=0,flipTo=0,flipStart=0;
+  let elapsed=0,lastTime=performance.now(),paused=false,lightOn=true,light=[-2.6,2.7,2.0],drag=null,lastInput=performance.now()-2000;
+  const count=4800,particles=new Float32Array(count*4);
+  let seed=481516;
+  function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;}
+  for(let i=0;i<count;i++){
+    const category=rand(),a=rand()*Math.PI*2,r=Math.sqrt(rand()),s=rand();
+    let x,y,z;
+    if(category<.62){
+      const h=.18+s*.90,rad=.76*(1-h/1.38)*Math.sqrt(rand());
+      x=Math.cos(a)*rad;z=Math.sin(a)*rad;y=-1.72+h;
+    }else if(category<.78){
+      const rad=.10+Math.sqrt(rand())*.55;
+      x=Math.cos(a)*rad;z=Math.sin(a)*rad;y=1.23+rand()*.27-rad*.10;
+    }else{
+      const streamR=.025+rand()*.075;
+      x=Math.cos(a)*streamR;z=Math.sin(a)*streamR;
+      y=1.33-rand()*2.18;
+    }
+    particles[i*4]=x;particles[i*4+1]=y;particles[i*4+2]=z;particles[i*4+3]=category<.62?rand()*.62:category<.78?.62+rand()*.16:1.+rand();
+  }
+  const particleBuffer=gl.createBuffer(),vao=gl.createVertexArray();
+  gl.bindVertexArray(vao);gl.bindBuffer(gl.ARRAY_BUFFER,particleBuffer);gl.bufferData(gl.ARRAY_BUFFER,particles,gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,16,0);
+  gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,1,gl.FLOAT,false,16,12);
+  gl.bindVertexArray(null);
+  function resize(){const dpr=Math.min(window.devicePixelRatio||1,1.5);const w=Math.max(1,Math.floor(canvas.clientWidth*dpr)),h=Math.max(1,Math.floor(canvas.clientHeight*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}}
+  window.addEventListener("resize",resize,{passive:true});resize();
+  const hint=document.getElementById("hint");setTimeout(()=>hint.classList.add("fade"),4200);
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+  function ease(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;}
+  canvas.addEventListener("pointerdown",e=>{canvas.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,light:e.button===2||e.shiftKey,button:e.button};lastInput=performance.now();});
+  canvas.addEventListener("contextmenu",e=>e.preventDefault());
+  canvas.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;if(drag.light){light[0]+=dx*.012;light[1]-=dy*.012;light[0]=clamp(light[0],-3.6,3.6);light[1]=clamp(light[1],-1.2,4.0);}else{yaw-=dx*.006;pitch=clamp(pitch+dy*.005,-.55,.62);}lastInput=performance.now();});
+  canvas.addEventListener("pointerup",()=>{drag=null;lastInput=performance.now();});
+  canvas.addEventListener("wheel",e=>{e.preventDefault();if(e.shiftKey)light[2]=clamp(light[2]+e.deltaY*.006,.7,5.5);else distance=clamp(distance+e.deltaY*.004,4.25,9.2);lastInput=performance.now();},{passive:false});
+  window.addEventListener("keydown",e=>{
+    if(e.code==="Space"){e.preventDefault();paused=!paused;lastTime=performance.now();}
+    else if(e.key==="1"||e.key==="2"||e.key==="3")paletteIndex=Number(e.key)-1;
+    else if(e.key.toLowerCase()==="l")lightOn=!lightOn;
+    else if(e.key.toLowerCase()==="r"){flipFrom=flip;flipTo=flipTo===0?1:0;flipStart=performance.now();lastInput=performance.now();}
+  });
+  function frame(now){
+    resize();let dt=Math.min((now-lastTime)/1000,.05);lastTime=now;
+    if(!paused)elapsed+=dt;
+    if(flip!==flipTo){const k=clamp((now-flipStart)/1500,0,1);flip=flipFrom+(flipTo-flipFrom)*ease(k);if(k===1)flip=flipTo;}
+    if(!drag&&now-lastInput>1600&&!paused){yaw+=dt*(Math.PI*2/35);pitch=.14+Math.sin(elapsed*.27)*.025;}
+    const palette=palettes[paletteIndex],fill=clamp(.12+elapsed/52,.12,.90);
+    gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);gl.useProgram(mainProgram);
+    gl.uniform2f(mainLoc.u_resolution,canvas.width,canvas.height);gl.uniform1f(mainLoc.u_time,elapsed);
+    gl.uniform1f(mainLoc.u_yaw,yaw);gl.uniform1f(mainLoc.u_pitch,pitch);gl.uniform1f(mainLoc.u_distance,distance);
+    gl.uniform1f(mainLoc.u_flip,flip);gl.uniform1f(mainLoc.u_fill,fill);gl.uniform1f(mainLoc.u_lightOn,lightOn?1:0);
+    gl.uniform3fv(mainLoc.u_light,light);gl.uniform3fv(mainLoc.u_palette,palette);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+    gl.useProgram(particleProgram);gl.uniform2f(partLoc.u_resolution,canvas.width,canvas.height);
+    gl.uniform1f(partLoc.u_time,elapsed);gl.uniform1f(partLoc.u_yaw,yaw);gl.uniform1f(partLoc.u_pitch,pitch);gl.uniform1f(partLoc.u_distance,distance);
+    gl.uniform1f(partLoc.u_flip,flip);gl.uniform1f(partLoc.u_paused,paused?1:0);gl.uniform1f(partLoc.u_fill,fill);gl.uniform3fv(partLoc.u_palette,palette);
+    gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);gl.bindVertexArray(vao);gl.drawArrays(gl.POINTS,0,count);gl.bindVertexArray(null);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
