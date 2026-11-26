@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#081018">
+  <link rel="icon" href="data:,">
+  <title>HD-2D Diorama Pack — Factory Droid · GLM-5.4 (BYOK)</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --accent: #31d9cf;
+      --pill-bg: rgba(10, 16, 26, 0.72);
+      --pill-border: rgba(255, 255, 255, 0.14);
+      --text: rgba(244, 248, 252, 0.92);
+      --muted: rgba(204, 218, 232, 0.64);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #081018;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    }
+
+    #viewport {
+      position: fixed;
+      inset: 0;
+      background: #081018;
+    }
+
+    #world-frame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: transparent;
+      opacity: 1;
+      transition: opacity 0.22s ease;
+    }
+
+    #world-frame.loading {
+      opacity: 0.35;
+    }
+
+    .switcher-wrap {
+      position: fixed;
+      left: 50%;
+      bottom: max(18px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      z-index: 20;
+      max-width: calc(100vw - 24px);
+      pointer-events: none;
+    }
+
+    .switcher {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px;
+      border-radius: 999px;
+      background: var(--pill-bg);
+      border: 1px solid var(--pill-border);
+      box-shadow:
+        0 14px 36px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(16px) saturate(150%);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+      pointer-events: auto;
+    }
+
+    .nav-btn,
+    .scene-btn {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      cursor: pointer;
+      border-radius: 999px;
+      transition:
+        background-color 0.16s ease,
+        color 0.16s ease,
+        box-shadow 0.16s ease,
+        transform 0.12s ease;
+      white-space: nowrap;
+    }
+
+    .nav-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      font-size: 16px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .scene-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 30px;
+      padding: 0 12px 0 8px;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+    }
+
+    .nav-btn:hover,
+    .scene-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .nav-btn:focus-visible,
+    .scene-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .scene-btn.active {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.14);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+    }
+
+    .scene-num {
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      transition: background-color 0.16s ease, color 0.16s ease;
+    }
+
+    .scene-btn.active .scene-num {
+      background: var(--accent);
+      color: #06131a;
+    }
+
+    .brand-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 10px 0 8px;
+      margin-left: 2px;
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      color: rgba(220, 234, 245, 0.62);
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .brand-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 900px) {
+      .brand-chip {
+        display: none;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .switcher {
+        gap: 2px;
+        padding: 4px;
+      }
+      .scene-btn {
+        padding: 0 9px 0 6px;
+        gap: 5px;
+        font-size: 11px;
+      }
+      .scene-label {
+        display: none;
+      }
+      .scene-btn.active .scene-label {
+        display: inline;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #world-frame,
+      .nav-btn,
+      .scene-btn,
+      .scene-num {
+        transition: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main id="viewport">
+    <iframe
+      id="world-frame"
+      title="Active HD-2D Diorama"
+      allow="fullscreen"
+    ></iframe>
+  </main>
+
+  <nav class="switcher-wrap" aria-label="HD-2D scene switcher">
+    <div class="switcher" role="toolbar" aria-label="Worlds 1 to 4">
+      <button type="button" class="nav-btn" id="prev-btn" aria-label="Previous world (Left arrow)" title="Previous world (Left)">&#8249;</button>
+      <button type="button" class="scene-btn" data-scene="1" title="Sunlit Coral Lagoon (1)">
+        <span class="scene-num">1</span>
+        <span class="scene-label">Coral Lagoon</span>
+      </button>
+      <button type="button" class="scene-btn" data-scene="2" title="Volcanic Hot-Spring Shrine (2)">
+        <span class="scene-num">2</span>
+        <span class="scene-label">Volcanic Shrine</span>
+      </button>
+      <button type="button" class="scene-btn" data-scene="3" title="Crystal Alchemist Greenhouse (3)">
+        <span class="scene-num">3</span>
+        <span class="scene-label">Crystal Greenhouse</span>
+      </button>
+      <button type="button" class="scene-btn" data-scene="4" title="Abyssal Biomechanical Reef (4)">
+        <span class="scene-num">4</span>
+        <span class="scene-label">Abyssal Reef</span>
+      </button>
+      <button type="button" class="nav-btn" id="next-btn" aria-label="Next world (Right arrow)" title="Next world (Right)">&#8250;</button>
+      <span class="brand-chip" aria-hidden="true">
+        <span class="brand-dot"></span>
+        Factory Droid · GLM-5.4 (BYOK)
+      </span>
+    </div>
+  </nav>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const SCENES = [
+        {
+          id: 1,
+          title: 'Sunlit Coral Lagoon',
+          src: './worlds/01-coral-lagoon/index.html',
+          accent: '#31d9cf'
+        },
+        {
+          id: 2,
+          title: 'Volcanic Hot-Spring Shrine',
+          src: './worlds/02-volcanic-shrine/index.html',
+          accent: '#ff681c'
+        },
+        {
+          id: 3,
+          title: 'Crystal Alchemist Greenhouse',
+          src: './worlds/03-crystal-greenhouse/index.html',
+          accent: '#f260c8'
+        },
+        {
+          id: 4,
+          title: 'Abyssal Biomechanical Reef',
+          src: './worlds/04-abyssal-reef/index.html',
+          accent: '#2ef3ff'
+        }
+      ];
+
+      const frame = document.getElementById('world-frame');
+      const prevBtn = document.getElementById('prev-btn');
+      const nextBtn = document.getElementById('next-btn');
+      const buttons = Array.from(document.querySelectorAll('.scene-btn'));
+
+      let activeId = 0;
+
+      function parseSceneFromUrl() {
+        const raw = new URLSearchParams(window.location.search).get('scene');
+        const parsed = Number.parseInt(raw ?? '', 10);
+        if (parsed >= 1 && parsed <= SCENES.length) return parsed;
+        return 1;
+      }
+
+      function updateUrl(id, { replace = false } = {}) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('scene', String(id));
+        const method = replace ? 'replaceState' : 'pushState';
+        window.history[method]({ scene: id }, '', url.toString());
+      }
+
+      function setScene(id, { historyMode = 'push' } = {}) {
+        const scene = SCENES[id - 1] ?? SCENES[0];
+        if (!scene) return;
+
+        if (historyMode === 'push' && activeId !== scene.id) {
+          updateUrl(scene.id, { replace: false });
+        } else if (historyMode === 'replace') {
+          updateUrl(scene.id, { replace: true });
+        }
+
+        activeId = scene.id;
+        document.documentElement.style.setProperty('--accent', scene.accent);
+        document.title = `${scene.title} — HD-2D Diorama Pack`;
+
+        for (const btn of buttons) {
+          const isCurrent = Number(btn.dataset.scene) === scene.id;
+          btn.classList.toggle('active', isCurrent);
+          btn.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+        }
+
+        if (frame.getAttribute('src') !== scene.src) {
+          frame.classList.add('loading');
+          frame.title = scene.title;
+          frame.setAttribute('src', scene.src);
+        }
+      }
+
+      function handleKeyDown(event) {
+        if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
+          return;
+        }
+        const tag = event.target?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable) {
+          return;
+        }
+
+        if (event.key >= '1' && event.key <= '4') {
+          event.preventDefault();
+          setScene(Number(event.key));
+          return;
+        }
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          const prev = activeId <= 1 ? SCENES.length : activeId - 1;
+          setScene(prev);
+          return;
+        }
+        if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          const next = activeId >= SCENES.length ? 1 : activeId + 1;
+          setScene(next);
+        }
+      }
+
+      frame.addEventListener('load', () => {
+        frame.classList.remove('loading');
+        try {
+          frame.contentWindow?.addEventListener('keydown', handleKeyDown);
+        } catch {
+          // Ignore cross-origin restrictions if ever loaded in a sandboxed context.
+        }
+      });
+
+      for (const btn of buttons) {
+        btn.addEventListener('click', () => {
+          setScene(Number(btn.dataset.scene));
+        });
+      }
+
+      prevBtn.addEventListener('click', () => {
+        const prev = activeId <= 1 ? SCENES.length : activeId - 1;
+        setScene(prev);
+      });
+
+      nextBtn.addEventListener('click', () => {
+        const next = activeId >= SCENES.length ? 1 : activeId + 1;
+        setScene(next);
+      });
+
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('popstate', () => {
+        setScene(parseSceneFromUrl(), { historyMode: 'none' });
+      });
+
+      const initialScene = parseSceneFromUrl();
+      const hasValidParam = new URLSearchParams(window.location.search).get('scene') === String(initialScene);
+      setScene(initialScene, { historyMode: hasValidParam ? 'none' : 'replace' });
+    })();
+  </script>
+</body>
+</html>

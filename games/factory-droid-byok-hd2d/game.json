@@ -1,0 +1,18 @@
+{
+  "slug": "factory-droid-byok-hd2d",
+  "title": "HD-2D Diorama Pack",
+  "category": "showcases",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "Four interactive HD-2D WebGL island dioramas in one switcher: Sunlit Coral Lagoon, Volcanic Hot-Spring Shrine, Crystal Alchemist Greenhouse, and Abyssal Biomechanical Reef.",
+  "description": "A 4-in-1 interactive HD-2D Three.js showcase built via Factory Droid with GLM-5.4 (BYOK). Switch seamlessly between four self-contained 3D dioramas: Sunlit Coral Lagoon (tropical atoll with sailboat, pier, and swaying palms), Volcanic Hot-Spring Shrine (twilight lava fissure, jade hot spring, torii gate, and rising steam), Crystal Alchemist Greenhouse (floating aurora-lit glass conservatory with glowing crystals), and Abyssal Biomechanical Reef (sunken temple arch, bioluminescent coral, jellyfish, and miniature submarine). Drag to orbit and scroll to zoom inside any scene; press 1–4, Left/Right arrows, or use the floating switcher bar (or ?scene=1..4) to change worlds.",
+  "accent": "#31d9cf",
+  "tags": [
+    "Three.js",
+    "WebGL",
+    "3D",
+    "HD-2D",
+    "Shaders"
+  ],
+  "cover": "cover.webp"
+}
