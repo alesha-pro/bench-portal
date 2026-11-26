@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROSE WINDOW</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; background: #07060a; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  canvas.drag { cursor: grabbing; }
+  #title {
+    position: fixed; top: 26px; left: 0; right: 0; text-align: center;
+    font: 600 12px/1 "Helvetica Neue", Arial, sans-serif; letter-spacing: 0.55em;
+    color: rgba(255, 236, 210, 0.55); pointer-events: none;
+    text-shadow: 0 0 18px rgba(255, 180, 120, 0.25);
+    transition: color 1.2s;
+  }
+  #hint {
+    position: fixed; bottom: 22px; left: 0; right: 0; text-align: center;
+    font: 400 12px/1.5 "Helvetica Neue", Arial, sans-serif; letter-spacing: 0.12em;
+    color: rgba(255, 245, 230, 0.6); pointer-events: none;
+    transition: opacity 1.6s ease;
+  }
+  #light {
+    position: fixed; top: 22px; right: 26px; text-align: right;
+    font: 400 11px/1.5 "Helvetica Neue", Arial, sans-serif; letter-spacing: 0.14em;
+    color: rgba(255, 245, 230, 0.0); pointer-events: none;
+    transition: color 0.5s ease;
+  }
+  #light.on { color: rgba(255, 245, 230, 0.5); }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="title">ROSE WINDOW</div>
+<div id="hint">drag &middot; orbit &nbsp;&nbsp; wheel &middot; zoom &nbsp;&nbsp; 1 / 2 / 3 &middot; light &nbsp;&nbsp; space &middot; pause</div>
+<div id="light">sun &middot; <span id="lightv">0&deg;</span></div>
+<script>
+"use strict";
+const VS = `#version 300 es
+precision highp float;
+in vec2 aPos;
+out vec2 vUv;
+void main(){ vUv = aPos*0.5+0.5; gl_Position = vec4(aPos,0.0,1.0); }`;
+
+// Scene pass: raymarch the alcove, rose window, god rays and dust.
+const FS_SCENE = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+in vec2 vUv;
+uniform vec2 uRes;
+uniform float uTime;
+uniform vec3 uCamPos;
+uniform mat3 uCamRot;
+uniform float uFov;
+uniform vec3 uSunDir;      // direction TOWARD the sun (from scene)
+uniform vec3 uSunCol;
+uniform vec3 uAmbSky;
+uniform vec3 uAmbGround;
+uniform sampler2D uPattern;   // rose tracery + glass colour (rgb), transmission (a)
+uniform float uSpin;          // rose rotation
+uniform float uSunI;          // sun intensity (HDR)
+uniform vec2 uNearFar;
+uniform vec3 uCamFwd;
+uniform float uMoon;          // 0 sun .. 1 moon
+uniform float uExposure;
+uniform vec2 uLightTilt;   // user-adjusted sun azimuth/elevation offset
+
+const float PI = 3.14159265;
+const int STEPS = 96;
+const int MSTEPS = 48;
+
+// ---------- helpers ----------
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+float hash11(float p){ p=fract(p*0.1031); p*=p+33.33; p*=p+p; return fract(p); }
+float hash21(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float noise2(vec2 p){
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),
+             mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),f.x),f.y);
+}
+float fbm(vec2 p){ float a=0.5, r=0.0; for(int i=0;i<4;i++){ r+=a*noise2(p); p=p*2.03+vec2(17.1,9.3); a*=0.5; } return r; }
+float sdBox(vec3 p, vec3 b){ vec3 q=abs(p)-b; return length(max(q,0.0))+min(max(q.x,max(q.y,q.z)),0.0); }
+float sdRing(vec2 p, float r){ return abs(length(p)-r); }
+
+float hash13(vec3 p){ p=fract(p*0.1031); p+=dot(p,p.zyx+31.32); return fract((p.x+p.y)*p.z); }
+float vnoise(vec3 p){
+  vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  float a=hash13(i), b=hash13(i+vec3(1,0,0)), c=hash13(i+vec3(0,1,0)), d=hash13(i+vec3(1,1,0));
+  float e=hash13(i+vec3(0,0,1)), g=hash13(i+vec3(1,0,1)), h=hash13(i+vec3(0,1,1)), k=hash13(i+vec3(1,1,1));
+  return mix(mix(mix(a,b,f.x),mix(c,d,f.x),f.y), mix(mix(e,g,f.x),mix(h,k,f.x),f.y), f.z);
+}
+
+// ---------- scene geometry: apse with a round window ----------
+const vec3 WC = vec3(0.0, 3.6, -7.25);   // window centre (glass plane)
+const float WR = 1.6;                    // glass radius
+const float ZWALL = -7.6;                // back wall
+const vec2 CL = vec2(-2.7, -4.6);        // left column
+const vec2 CR = vec2( 2.7, -4.6);        // right column
+
+float sdFrame(vec3 p){
+  float ring = max(abs(length(p.xy - WC.xy) - 1.82) - 0.22, abs(p.z - (ZWALL + 0.30)) - 0.30);
+  float best = ring;
+  for(int s=0;s<2;s++){
+    vec2 c = (s==0) ? CL : CR;
+    float shaft = max(length(p.xz - c) - 0.38, 0.5 - p.y);
+    float base  = max(length(p.xz - c) - 0.56, abs(p.y - 0.25) - 0.25);
+    float cap   = max(length(p.xz - c) - 0.52, abs(p.y - 6.4) - 0.2);
+    best = min(best, min(shaft, min(base, cap)));
+  }
+  return best;
+}
+float sdGlass(vec3 p){ return max(length(p.xy - WC.xy) - 1.63, abs(p.z - WC.z) - 0.012); }
+// x = distance to the nearest surface (positive in open space), y = unused
+vec2 mapScene(vec3 p){
+  float box = sdBox(p - vec3(0.0, 4.0, -1.05), vec3(4.0, 4.0, 6.55));    // x +-4, y 0..8, z -7.6..5.5
+  float vault = length(p.xy - vec2(0.0, 4.2)) - 4.0;                    // barrel vault above the spring line
+  float room = max(box, min(vault, p.y - 4.2));
+  float cyl = length(p.xy - WC.xy) - 1.68;                              // window tunnel axis
+  float slab = abs(p.z + 7.9) - 1.3;                                    // wall slab containing it
+  room = min(room, max(cyl, slab));                                     // open = room OR (cylinder AND slab)
+  room = max(room, -sdFrame(p));
+  room = max(room, -sdGlass(p));
+  return vec2(-room, 0.0);                 // positive in open space, negative inside stone/glass
+}
+float matId(vec3 p, vec3 n){
+  if(sdGlass(p) < 0.02) return 3.0;
+  if(sdFrame(p) < 0.02) return 4.0;
+  if(n.y > 0.6) return 1.0;
+  if(p.y > 4.3 && n.y < -0.3) return 2.0;
+  return 0.0;
+}
+vec3 calcNormal(vec3 p){
+  const vec2 e = vec2(0.0025, -0.0025);
+  return normalize(e.xyy*mapScene(p+e.xyy).x + e.yyx*mapScene(p+e.yyx).x + e.yxy*mapScene(p+e.yxy).x + e.xxx*mapScene(p+e.xxx).x);
+}
+float calcAO(vec3 p, vec3 n){
+  float occ = 0.0, w = 0.6;
+  for(int i=0;i<3;i++){ float h = 0.12 + 0.22*float(i); occ += (h - mapScene(p + n*h).x)*w; w *= 0.6; }
+  return clamp(1.0 - 1.6*occ, 0.0, 1.0);
+}
+
+// ---------- sunlight through the rose ----------
+// Light reaching point p through the glass; mask = transmission (0 outside the beam).
+// lod selects sharp tracery for surfaces (0) or a soft blur for the hazy volume (3).
+vec3 shaftAt(vec3 p, out float mask, float lod){
+  mask = 0.0;
+  if(uSunDir.z > -0.05) return vec3(0.0);
+  float t = (WC.z - p.z) / uSunDir.z;
+  if(t < 0.0) return vec3(0.0);
+  vec3 q = p + uSunDir*t;
+  vec2 g = q.xy - WC.xy;
+  float rr = length(g) / WR;
+  if(rr > 1.0) return vec3(0.0);
+  float sh = 1.0;   // columns / tracery shadows
+  for(int i=1;i<=3;i++){
+    vec3 s = p + uSunDir*(t*float(i)/4.0);
+    if(sdFrame(s) < 0.0) sh = 0.0;
+  }
+  vec2 uv = rot(-uSpin) * g / WR;
+  vec4 s = textureLod(uPattern, uv*0.5 + 0.5, lod);
+  mask = s.a * smoothstep(1.0, 0.985, rr) * sh;
+  return s.rgb * uSunCol * (uSunI * mask);
+}
+
+// ---------- surface shading ----------
+vec3 stoneAlbedo(vec3 p, vec3 n, float id){
+  float grain = fbm(p.xz*6.0 + p.yx*2.5);
+  if(id > 0.5 && id < 1.5){                                   // flagstone floor
+    vec2 cc = p.xz / 1.15;
+    cc.y += 0.5*floor(cc.x);
+    vec2 cell = floor(cc), lp = fract(cc);
+    float joint = smoothstep(0.0, 0.03, min(min(lp.x, 1.0-lp.x), min(lp.y, 1.0-lp.y)));
+    float tint = 0.8 + 0.4*hash21(cell);
+    vec3 a = vec3(0.30, 0.27, 0.24) * tint * (0.75 + 0.5*grain);
+    return mix(vec3(0.045), a, joint);
+  }
+  if(id > 1.5 && id < 2.5) return vec3(0.17, 0.15, 0.14) * (0.7 + 0.6*grain);   // vault
+  if(id > 3.5){                                               // carved stone frame / columns
+    float streak = noise2(vec2(p.y*2.2, (p.x + p.z)*4.0));
+    return vec3(0.42, 0.37, 0.31) * (0.7 + 0.6*grain) * (0.75 + 0.5*streak);
+  }
+  float u = (abs(n.x) > 0.5) ? p.z : p.x;                     // ashlar wall blocks
+  float course = floor(p.y / 0.46);
+  float shift = 0.5*mod(course, 2.0);
+  vec2 b = vec2(fract(u/0.92 + shift), fract(p.y/0.46));
+  float mortar = smoothstep(0.0, 0.03, min(min(b.x, 1.0-b.x)*0.92, min(b.y, 1.0-b.y)*0.46));
+  float tint = 0.75 + 0.5*hash21(vec2(floor(u/0.92 + shift), course));
+  vec3 a = vec3(0.23, 0.20, 0.18) * tint * (0.7 + 0.6*grain);
+  return mix(vec3(0.11,0.10,0.09), a, mortar);
+}
+vec3 shade(vec3 p, vec3 n, float id, vec3 rd){
+  vec3 alb = stoneAlbedo(p, n, id);
+  float ao = calcAO(p, n);
+  vec3 amb = mix(uAmbGround, uAmbSky, n.y*0.5+0.5) * ao;
+  vec3 toW = WC - p; float dW = length(toW);
+  float att = 1.0 / (1.0 + 0.06*dW*dW);
+  float ndlW = max(dot(n, toW/dW), 0.0);
+  vec3 fill = uSunCol * uSunI * 0.035 * ndlW * ao * att;
+  float m; vec3 shaft = shaftAt(p + n*0.012, m, 0.0);
+  vec3 spot = shaft * max(dot(n, uSunDir), 0.0) * 0.5;
+  vec3 h = normalize(toW/dW - rd);
+  float spec = pow(max(dot(n, h), 0.0), 28.0) * 0.05 * ao * att;
+  return alb*(amb + fill + spot) + uSunCol*spec*uSunI*0.02;
+}
+vec3 glassLook(vec3 rd, vec2 g){
+  vec2 uv = rot(-uSpin) * g / WR;
+  vec4 s = texture(uPattern, uv*0.5 + 0.5);
+  float hot = pow(max(dot(rd, uSunDir), 0.0), 36.0);
+  vec3 back = uSunCol * (uSunI * 0.13 + 2.0 * hot + 0.22);
+  vec3 c = s.rgb * s.a * back * (0.85 + 0.3*s.a);
+  c += s.rgb * (1.0 - s.a) * (uAmbSky * 0.6 + uSunCol*uSunI*0.012);
+  return c;
+}
+
+void main(){
+  vec2 uv = vUv*2.0 - 1.0;
+  uv.x *= uRes.x / uRes.y;
+  vec3 ro = uCamPos;
+  vec3 rd = normalize(uCamRot * normalize(vec3(uv * uFov, 1.0)));
+  float t = 0.0, hit = 0.0;
+  vec3 p = ro, vol = vec3(0.0);
+  for(int i=0;i<STEPS;i++){
+    p = ro + rd*t;
+    vec2 h = mapScene(p);
+    if(h.x < 0.0012*(1.0 + t*0.3)){ hit = 1.0; break; }
+    if(t > 45.0) break;
+    float m; vec3 sh = shaftAt(p, m, 3.0);
+    float dens = 0.010 + 0.06*vnoise(p*1.4 + vec3(0.0, -uTime*0.06, uTime*0.03));
+    float stepL = max(h.x*0.85, 0.02);
+    vol += (sh * 0.06 * dens + uAmbSky * (0.0022*m + 0.0010)) * stepL;
+    t += stepL;
+  }
+  vec3 col; float mask = 0.0;
+  if(hit > 0.5){
+    vec3 n = calcNormal(p);
+    float id = matId(p, n);
+    if(id > 2.5 && id < 3.5){ col = glassLook(rd, p.xy - WC.xy); mask = 1.0; }
+    else {
+      col = shade(p, n, id, rd);
+      float m; shaftAt(p + n*0.012, m, 0.0);
+      mask = m * 0.12 * step(0.5, n.y);
+    }
+    float vz = max(dot(p - ro, uCamFwd), 0.05);
+    float nf = uNearFar.y - uNearFar.x;
+    float ndc = (uNearFar.y + uNearFar.x)/nf - 2.0*uNearFar.y*uNearFar.x/(nf*vz);
+    gl_FragDepth = clamp(ndc*0.5 + 0.5, 0.0, 1.0);
+  } else {
+    col = uSunCol * uSunI * 1.2 + uSunCol * pow(max(dot(rd, uSunDir), 0.0), 24.0) * uSunI * 0.6;
+    mask = 1.0;
+    gl_FragDepth = 1.0;
+  }
+  col += vol;
+  float fog = 1.0 - exp(-0.02*t);
+  col = mix(col, uAmbSky*0.6 + uSunCol*uSunI*0.002, fog*0.5);
+  fragColor = vec4(col, mask);
+}
+`;
+
+// Rose tracery + glass colours, rendered once into a 512x512 texture (a = transmission).
+const FS_PATTERN = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+in vec2 vUv;
+const float PI = 3.14159265;
+float hash21(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+float noise2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x), mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),f.x), f.y); }
+void main(){
+  vec2 p = vUv*2.0 - 1.0;
+  float r = length(p), ang = atan(p.y, p.x);
+  float nO = 12.0, nI = 6.0, nC = 4.0;
+  float so = ang*nO/(2.0*PI); float io = floor(so); float fo = fract(so);
+  float si = ang*nI/(2.0*PI); float ii = floor(si); float fi = fract(si);
+  float sc = ang*nC/(2.0*PI); float fc = fract(sc);
+  float edgeO = 0.60 + 0.385*pow(sin(PI*fo), 0.45);
+  float edgeI = 0.30 + 0.235*pow(sin(PI*fi), 0.5);
+  float edgeC = 0.10 + 0.13*pow(sin(PI*fc), 0.5);
+  float outer = step(0.52, r)*step(r, edgeO);
+  float inner = step(0.24, r)*step(r, edgeI);
+  float centre = step(r, edgeC);
+  float glass = max(max(outer, inner), centre);
+  float w = 0.012;
+  float lead = 0.0;
+  lead = max(lead, smoothstep(w, 0.0, abs(r-edgeO))*step(0.52, r));
+  lead = max(lead, smoothstep(w, 0.0, abs(r-0.52)));
+  lead = max(lead, smoothstep(w, 0.0, abs(r-edgeI))*step(0.24, r));
+  lead = max(lead, smoothstep(w, 0.0, abs(r-0.24)));
+  lead = max(lead, smoothstep(w, 0.0, abs(r-edgeC)));
+  lead = max(lead, smoothstep(w, 0.0, abs(r-0.995)));
+  lead = max(lead, smoothstep(w, 0.0, min(fo, 1.0-fo)*(2.0*PI*r/nO))*step(0.52, r)*step(r, 0.995));
+  lead = max(lead, smoothstep(w, 0.0, min(fi, 1.0-fi)*(2.0*PI*r/nI))*step(0.24, r)*step(r, 0.52));
+  lead = max(lead, smoothstep(w, 0.0, min(fc, 1.0-fc)*(2.0*PI*r/nC))*step(r, 0.24));
+  lead = max(lead, smoothstep(w, 0.0, abs(r-0.05)));
+  float ao = (fo - 0.5)*2.0*PI*r/nO;          // small boss inside each outer petal
+  float dO = length(vec2(ao, r - 0.80));
+  lead = max(lead, smoothstep(w, 0.0, abs(dO - 0.07))*outer);
+  float ai = (fi - 0.5)*2.0*PI*r/nI;
+  float dI = length(vec2(ai, r - 0.38));
+  lead = max(lead, smoothstep(w, 0.0, abs(dI - 0.05))*inner);
+  vec3 ruby=vec3(0.72,0.02,0.05), cobalt=vec3(0.02,0.09,0.72), amber=vec3(0.95,0.40,0.02);
+  vec3 emrald=vec3(0.0,0.42,0.17), violet=vec3(0.28,0.02,0.55);
+  vec3 colOuter[4] = vec3[4](ruby, amber, cobalt, emrald);
+  vec3 colInner[3] = vec3[3](amber, violet, cobalt);
+  vec3 c = colOuter[int(mod(io, 4.0))];
+  if(inner > 0.5) c = colInner[int(mod(ii, 3.0))];
+  if(centre > 0.5) c = (mod(floor(ang*8.0/(2.0*PI)), 2.0) < 0.5) ? amber : ruby;
+  vec3 col = mix(vec3(0.16, 0.04, 0.30), c, glass);         // deep violet glass between petals
+  col *= 0.78 + 0.44*noise2(p*9.0 + 3.0);
+  float trans = mix(0.32, 0.95 + 0.25*noise2(p*5.0), glass);
+  trans = mix(trans, 0.05, lead);
+  col = mix(col, vec3(0.03), lead);
+  if(r > 1.0){ col = vec3(0.0); trans = 0.0; }
+  fragColor = vec4(col, trans);
+}`;
+
+// Bloom prefilter + separable blur.
+const FS_BRIGHT = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform float uThresh;
+void main(){
+  vec3 c = texture(uTex, vUv).rgb;
+  float l = dot(c, vec3(0.2126,0.7152,0.0722));
+  float k = smoothstep(uThresh, uThresh+0.6, l);
+  fragColor = vec4(c*k, 1.0);
+}`;
+
+const FS_BLUR = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main(){
+  vec3 c = texture(uTex, vUv).rgb * 0.227027;
+  c += texture(uTex, vUv + uDir*1.384615).rgb * 0.316216;
+  c += texture(uTex, vUv - uDir*1.384615).rgb * 0.316216;
+  c += texture(uTex, vUv + uDir*3.230769).rgb * 0.070270;
+  c += texture(uTex, vUv - uDir*3.230769).rgb * 0.070270;
+  fragColor = vec4(c, 1.0);
+}`;
+
+// Composite: god rays (radial gather of the scene light mask) + bloom + ACES + vignette.
+const FS_FINAL = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+in vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform float uExposure;
+uniform float uVig;
+uniform vec2 uSunUv;
+uniform vec3 uSunCol;
+uniform float uRayI;
+const int NR = 40;
+vec3 aces(vec3 x){
+  const float a=2.51, b=0.03, c=2.43, d=0.59, e=0.14;
+  return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+}
+void main(){
+  vec3 c = texture(uScene, vUv).rgb;
+  vec2 stp = (uSunUv - vUv) / float(NR);
+  vec2 uv = vUv + stp * fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  float illum = 0.0, w = 1.0;
+  for(int i=0;i<NR;i++){ uv += stp; illum += texture(uScene, uv).a * w; w *= 0.955; }
+  c += uSunCol * (illum / float(NR)) * uRayI;
+  c += texture(uBloom, vUv).rgb * 0.6;
+  c *= uExposure;
+  c = aces(c);
+  c = pow(c, vec3(1.0/2.2));
+  float v = smoothstep(0.92, 0.3, length(vUv - 0.5));
+  c *= mix(1.0, v, uVig);
+  c = max(c, vec3(0.012, 0.012, 0.016));
+  fragColor = vec4(c, 1.0);
+}`;
+
+// Dust motes: soft point sprites lit only where they cross the rose's light shafts.
+const VS_DUST = `#version 300 es
+precision highp float;
+in vec3 aSeed;
+uniform mat4 uMVP;
+uniform float uTime;
+uniform vec3 uSunDir;
+uniform vec3 uSunCol;
+uniform float uSunI;
+uniform float uSpin;
+uniform float uPx;
+uniform sampler2D uPattern;
+out vec3 vCol;
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+void main(){
+  float ph = aSeed.x*37.0;
+  vec3 pos = vec3(aSeed.x*7.0 - 3.5, 0.0, aSeed.z*11.0 - 7.0);
+  pos.y = mod(aSeed.y*7.4 + uTime*0.05*(0.4 + aSeed.z), 7.4) + 0.2;
+  pos.x += 0.25*sin(uTime*0.11 + ph) + 0.10*sin(uTime*0.31 + ph*2.0);
+  pos.z += 0.20*cos(uTime*0.09 + ph*1.3);
+  vec3 col = vec3(0.0);
+  if(uSunDir.z < -0.05){
+    float t = (-7.25 - pos.z)/uSunDir.z;
+    vec2 g = (pos + uSunDir*t).xy - vec2(0.0, 3.6);
+    float rr = length(g)/1.6;
+    if(t > 0.0 && rr < 1.0){
+      vec4 s = textureLod(uPattern, rot(-uSpin)*g/1.6*0.5 + 0.5, 0.0);
+      col = s.rgb * s.a * uSunCol * uSunI * 0.035;
+    }
+  }
+  col += uSunCol * uSunI * 0.0015 + vec3(0.006, 0.0065, 0.008);
+  vCol = col;
+  vec4 cp = uMVP * vec4(pos, 1.0);
+  gl_Position = cp;
+  gl_PointSize = clamp(70.0 / max(cp.w, 0.2), 1.2, 7.0) * uPx;
+}`;
+
+const FS_DUST = `#version 300 es
+precision highp float;
+in vec3 vCol;
+out vec4 fragColor;
+void main(){
+  vec2 d = gl_PointCoord*2.0 - 1.0;
+  float r2 = dot(d, d);
+  float a = exp(-r2*5.0) * smoothstep(1.0, 0.5, r2);
+  fragColor = vec4(vCol * a, 0.0);
+}`;
+
+// FXAA (console-quality variant) applied last.
+const FS_FXAA = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+in vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+void main(){
+  vec3 rgbM = texture(uTex, vUv).rgb;
+  vec3 rgbNW = texture(uTex, vUv + vec2(-1.0,-1.0)*uTexel).rgb;
+  vec3 rgbNE = texture(uTex, vUv + vec2( 1.0,-1.0)*uTexel).rgb;
+  vec3 rgbSW = texture(uTex, vUv + vec2(-1.0, 1.0)*uTexel).rgb;
+  vec3 rgbSE = texture(uTex, vUv + vec2( 1.0, 1.0)*uTexel).rgb;
+  float lM = luma(rgbM), lNW = luma(rgbNW), lNE = luma(rgbNE), lSW = luma(rgbSW), lSE = luma(rgbSE);
+  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
+  float dirReduce = max((lNW + lNE + lSW + lSE) * 0.25 * 0.03125, 0.0078125);
+  float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+  dir = clamp(dir * rcpDirMin, vec2(-8.0), vec2(8.0)) * uTexel;
+  vec3 rgbA = 0.5 * (texture(uTex, vUv + dir*(1.0/3.0 - 0.5)).rgb + texture(uTex, vUv + dir*(2.0/3.0 - 0.5)).rgb);
+  vec3 rgbB = rgbA * 0.5 + 0.25 * (texture(uTex, vUv + dir*-0.5).rgb + texture(uTex, vUv + dir*0.5).rgb);
+  float lB = luma(rgbB);
+  fragColor = vec4((lB < lMin || lB > lMax) ? rgbA : rgbB, 1.0);
+}`;
+
+// ---------- WebGL pipeline ----------
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "high-performance" });
+if(!gl){ document.getElementById("hint").textContent = "WebGL2 is required"; throw new Error("WebGL2 unavailable"); }
+const HDR = !!gl.getExtension("EXT_color_buffer_float");
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    const lines = src.split("\n").map((l, i) => (i+1) + ": " + l).join("\n");
+    throw new Error(gl.getShaderInfoLog(s) + "\n" + lines);
+  }
+  return s;
+}
+function program(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for(let i=0;i<n;i++){
+    const info = gl.getActiveUniform(p, i);
+    u[info.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u };
+}
+function makeTarget(w, h, hdr){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, hdr ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  return { t, f, w, h };
+}
+
+const progPattern = program(VS, FS_PATTERN);
+const progScene   = program(VS, FS_SCENE);
+const progBright  = program(VS, FS_BRIGHT);
+const progBlur    = program(VS, FS_BLUR);
+const progFinal   = program(VS, FS_FINAL);
+const progFxaa    = program(VS, FS_FXAA);
+const progDust    = program(VS_DUST, FS_DUST);
+
+// fullscreen triangle strip
+const quadVAO = gl.createVertexArray();
+gl.bindVertexArray(quadVAO);
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+// dust seeds
+const DUST_N = 1100;
+const seeds = new Float32Array(DUST_N*3);
+let rs = 1234567;
+const rnd = () => { rs = (rs*1664525 + 1013904223) >>> 0; return rs / 4294967296; };
+for(let i=0;i<seeds.length;i++) seeds[i] = rnd();
+const dustVAO = gl.createVertexArray();
+gl.bindVertexArray(dustVAO);
+const dustBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, dustBuf);
+gl.bufferData(gl.ARRAY_BUFFER, seeds, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+gl.bindVertexArray(null);
+
+// render targets
+let W = 1, H = 1;
+let sceneRT, depthRB, finalRT, brightRT, bloomA, bloomB;
+const patternRT = makeTarget(512, 512, false);
+gl.bindTexture(gl.TEXTURE_2D, patternRT.t);
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const w = Math.max(2, Math.floor(canvas.clientWidth * dpr));
+  const h = Math.max(2, Math.floor(canvas.clientHeight * dpr));
+  if(w === W && h === H && sceneRT) return;
+  W = w; H = h;
+  canvas.width = W; canvas.height = H;
+  for(const rt of [sceneRT, finalRT, brightRT, bloomA, bloomB]) if(rt){ gl.deleteTexture(rt.t); gl.deleteFramebuffer(rt.f); }
+  sceneRT = makeTarget(W, H, HDR);
+  finalRT = makeTarget(W, H, false);
+  const hw = W >> 1, hh = H >> 1;
+  brightRT = makeTarget(hw, hh, HDR);
+  bloomA = makeTarget(hw, hh, HDR);
+  bloomB = makeTarget(hw, hh, HDR);
+  if(!depthRB) depthRB = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, depthRB);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, W, H);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneRT.f);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthRB);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+// draw the rose pattern once, then build mipmaps for smooth sampling
+function drawPattern(){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, patternRT.f);
+  gl.viewport(0, 0, 512, 512);
+  gl.useProgram(progPattern.p);
+  gl.bindVertexArray(quadVAO);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindTexture(gl.TEXTURE_2D, patternRT.t);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+// ---------- small matrix helpers (column-major) ----------
+const sub = (a,b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const dot = (a,b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => { const l = Math.hypot(a[0],a[1],a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+const clamp = (x,a,b) => Math.min(b, Math.max(a, x));
+function persp(fovy, aspect, n, f){
+  const t = 1 / Math.tan(fovy/2);
+  return new Float32Array([t/aspect,0,0,0, 0,t,0,0, 0,0,(f+n)/(n-f),-1, 0,0,2*f*n/(n-f),0]);
+}
+function lookAt(e, c, up){
+  const f = norm(sub(c, e)), s = norm(cross(f, up)), u = cross(s, f);
+  return new Float32Array([s[0],u[0],-f[0],0, s[1],u[1],-f[1],0, s[2],u[2],-f[2],0, -dot(s,e),-dot(u,e),dot(f,e),1]);
+}
+function mul4(a, b){
+  const o = new Float32Array(16);
+  for(let c=0;c<4;c++) for(let r=0;r<4;r++){ let s=0; for(let k=0;k<4;k++) s += a[k*4+r]*b[c*4+k]; o[c*4+r]=s; }
+  return o;
+}
+function project(m, p){          // world -> uv (0..1), plus w
+  const x = m[0]*p[0]+m[4]*p[1]+m[8]*p[2]+m[12], y = m[1]*p[0]+m[5]*p[1]+m[9]*p[2]+m[13];
+  const w = m[3]*p[0]+m[7]*p[1]+m[11]*p[2]+m[15];
+  return [x/w*0.5+0.5, y/w*0.5+0.5, w];
+}
+
+// ---------- lighting presets: 1 sunset, 2 noon, 3 moonlight ----------
+const PRESETS = [
+  { name: "golden sunset",  az: -0.38, el: 0.36, sun: [1.00, 0.58, 0.26], sunI: 6.0, sky: [0.100, 0.075, 0.065], gnd: [0.030, 0.024, 0.022], exp: 1.00, vig: 0.55, ray: 0.32, moon: 0 },
+  { name: "high noon",      az:  0.22, el: 1.08, sun: [0.72, 0.84, 1.00], sunI: 7.5, sky: [0.100, 0.125, 0.190], gnd: [0.030, 0.035, 0.050], exp: 0.92, vig: 0.50, ray: 0.28, moon: 0 },
+  { name: "pale moonlight", az: -0.15, el: 0.62, sun: [0.55, 0.68, 1.00], sunI: 2.1, sky: [0.045, 0.055, 0.095], gnd: [0.020, 0.022, 0.032], exp: 1.30, vig: 0.60, ray: 0.30, moon: 1 },
+];
+const cur = JSON.parse(JSON.stringify(PRESETS[0]));
+let tgt = PRESETS[0];
+let T = 0, paused = false, lastNow = performance.now();
+let yawUser = 0, pitchUser = 0, zoom = 1, tiltAz = 0, tiltEl = 0;
+let dragging = false, lightDrag = false, lightLock = false, lastX = 0, lastY = 0, lightTimer = 0;
+
+const TARGET = [0, 3.1, -3.6];
+const FOV = 52 * Math.PI / 180, NEAR = 0.1, FAR = 60;
+const lightEl = document.getElementById("light"), lightV = document.getElementById("lightv");
+const setPreset = i => { tgt = PRESETS[i]; };
+
+function showLight(az, el){
+  lightEl.classList.add("on");
+  lightV.textContent = Math.round(az * 180 / Math.PI) + "\u00b0 / " + Math.round(el * 180 / Math.PI) + "\u00b0";
+  clearTimeout(lightTimer);
+  lightTimer = setTimeout(() => lightEl.classList.remove("on"), 1500);
+}
+
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+canvas.addEventListener("pointerdown", e => {
+  canvas.setPointerCapture(e.pointerId);
+  dragging = true;
+  lightDrag = e.button === 2 || e.shiftKey || lightLock;
+  lastX = e.clientX; lastY = e.clientY;
+  canvas.classList.add("drag");
+});
+canvas.addEventListener("pointermove", e => {
+  if(!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if(lightDrag){
+    tiltAz = clamp(tiltAz - dx * 0.004, -1.0, 1.0);
+    tiltEl = clamp(tiltEl + dy * 0.004, -0.6, 0.9);
+    showLight(tiltAz, tiltEl);
+  } else {
+    yawUser = clamp(yawUser - dx * 0.005, -1.2, 1.2);
+    pitchUser = clamp(pitchUser + dy * 0.004, -0.6, 0.6);
+  }
+});
+const endDrag = () => { dragging = false; lightDrag = false; canvas.classList.remove("drag"); };
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  zoom = clamp(zoom * Math.exp(e.deltaY * 0.0012), 0.68, 1.35);
+}, { passive: false });
+window.addEventListener("keydown", e => {
+  if(e.key === "1" || e.key === "2" || e.key === "3") setPreset(+e.key - 1);
+  else if(e.code === "Space"){ e.preventDefault(); paused = !paused; }
+  else if(e.key === "l" || e.key === "L"){ lightLock = !lightLock; showLight(tiltAz, tiltEl); }
+  else if(e.key === "r" || e.key === "R"){ tiltAz = 0; tiltEl = 0; lightLock = false; showLight(0, 0); }
+});
+
+// ---------- per-frame update: eased preset blend, sun sweep, drifting camera ----------
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = clamp((now - lastNow) / 1000, 0.001, 0.05);
+  lastNow = now;
+  if(!paused) T += dt;
+  const k = 1 - Math.exp(-dt * 2.2);
+  for(const key of ["az", "el", "sunI", "exp", "vig", "ray", "moon"]) cur[key] += (tgt[key] - cur[key]) * k;
+  for(let i=0;i<3;i++){
+    cur.sun[i] += (tgt.sun[i] - cur.sun[i]) * k;
+    cur.sky[i] += (tgt.sky[i] - cur.sky[i]) * k;
+    cur.gnd[i] += (tgt.gnd[i] - cur.gnd[i]) * k;
+  }
+  if(!dragging){                       // ease back onto the automatic path
+    const kk = 1 - Math.exp(-dt * 0.7);
+    yawUser *= 1 - kk; pitchUser *= 1 - kk;
+  }
+  const az = cur.az + 0.22 * Math.sin(T * 0.07) + tiltAz;
+  const el = clamp(cur.el + 0.06 * Math.sin(T * 0.05 + 1.0) + tiltEl, 0.08, 1.45);
+  const D = [Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)];
+  const yaw = 0.42 * Math.sin(T * 2 * Math.PI / 36) + yawUser;          // 36 s auto orbit
+  const pitch = 0.10 + 0.05 * Math.sin(T * 2 * Math.PI / 47 + 1.0) + pitchUser;
+  const dist = (6.0 + 0.45 * Math.sin(T * 2 * Math.PI / 29)) * zoom;
+  const eye = [TARGET[0] + dist * Math.sin(yaw) * Math.cos(pitch),
+               TARGET[1] + dist * Math.sin(pitch),
+               TARGET[2] + dist * Math.cos(yaw) * Math.cos(pitch)];
+  const fwd = norm(sub(TARGET, eye)), right = norm(cross(fwd, [0, 1, 0])), up = cross(right, fwd);
+  const rotM = new Float32Array([right[0], right[1], right[2], up[0], up[1], up[2], fwd[0], fwd[1], fwd[2]]);
+  const mvp = mul4(persp(FOV, W / H, NEAR, FAR), lookAt(eye, TARGET, [0, 1, 0]));
+  const sp = project(mvp, [eye[0] + D[0] * 20, eye[1] + D[1] * 20, eye[2] + D[2] * 20]);
+  const sunUv = [clamp(sp[0], -0.4, 1.4), clamp(sp[1], -0.4, 1.4)];
+  render(D, eye, fwd, rotM, mvp, sunUv);
+}
+
+function pass(prog, rt, tex, setU){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, rt.f);
+  gl.viewport(0, 0, rt.w, rt.h);
+  gl.useProgram(prog.p);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(prog.u.uTex, 0);
+  setU(prog);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function render(D, eye, fwd, rotM, mvp, sunUv){
+  resize();
+  gl.disable(gl.BLEND);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.ALWAYS);
+  gl.depthMask(true);
+  // 1. raymarched alcove + volumetric shafts
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneRT.f);
+  gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(progScene.p);
+  const u = progScene.u;
+  gl.uniform2f(u.uRes, W, H);
+  gl.uniform1f(u.uTime, T);
+  gl.uniform3fv(u.uCamPos, eye);
+  gl.uniformMatrix3fv(u.uCamRot, false, rotM);
+  gl.uniform1f(u.uFov, Math.tan(FOV / 2));
+  gl.uniform3fv(u.uSunDir, D);
+  gl.uniform3fv(u.uSunCol, cur.sun);
+  gl.uniform3fv(u.uAmbSky, cur.sky);
+  gl.uniform3fv(u.uAmbGround, cur.gnd);
+  gl.uniform1f(u.uMoon, cur.moon);
+  gl.uniform1f(u.uSpin, T * 0.06);
+  gl.uniform1f(u.uSunI, cur.sunI);
+  gl.uniform2f(u.uNearFar, NEAR, FAR);
+  gl.uniform3fv(u.uCamFwd, fwd);
+  gl.uniform2f(u.uLightTilt, tiltAz, tiltEl);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, patternRT.t);
+  gl.uniform1i(u.uPattern, 0);
+  gl.bindVertexArray(quadVAO);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // 2. dust motes, depth-tested against the marched scene, added on top
+  gl.depthFunc(gl.LEQUAL);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(progDust.p);
+  const d = progDust.u;
+  gl.uniformMatrix4fv(d.uMVP, false, mvp);
+  gl.uniform1f(d.uTime, T);
+  gl.uniform3fv(d.uSunDir, D);
+  gl.uniform3fv(d.uSunCol, cur.sun);
+  gl.uniform1f(d.uSunI, cur.sunI);
+  gl.uniform1f(d.uSpin, T * 0.06);
+  gl.uniform1f(d.uPx, H / 720);
+  gl.uniform1i(d.uPattern, 0);
+  gl.bindVertexArray(dustVAO);
+  gl.drawArrays(gl.POINTS, 0, DUST_N);
+  gl.disable(gl.BLEND);
+  gl.disable(gl.DEPTH_TEST);
+  gl.bindVertexArray(quadVAO);
+  // 3. soft bloom (half resolution, two blur widths)
+  const hw = brightRT.w, hh = brightRT.h;
+  pass(progBright, brightRT, sceneRT.t, p => gl.uniform1f(p.u.uThresh, HDR ? 0.45 : 0.35));
+  pass(progBlur, bloomA, brightRT.t, p => gl.uniform2f(p.u.uDir, 1.0 / hw, 0));
+  pass(progBlur, bloomB, bloomA.t, p => gl.uniform2f(p.u.uDir, 0, 1.0 / hh));
+  pass(progBlur, bloomA, bloomB.t, p => gl.uniform2f(p.u.uDir, 2.5 / hw, 0));
+  pass(progBlur, brightRT, bloomA.t, p => gl.uniform2f(p.u.uDir, 0, 2.5 / hh));
+  // 4. composite: god rays, bloom, ACES, vignette
+  gl.bindFramebuffer(gl.FRAMEBUFFER, finalRT.f);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(progFinal.p);
+  const f = progFinal.u;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneRT.t); gl.uniform1i(f.uScene, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, brightRT.t); gl.uniform1i(f.uBloom, 1);
+  gl.uniform1f(f.uExposure, cur.exp);
+  gl.uniform1f(f.uVig, cur.vig);
+  gl.uniform2f(f.uSunUv, sunUv[0], sunUv[1]);
+  gl.uniform3fv(f.uSunCol, cur.sun);
+  gl.uniform1f(f.uRayI, cur.ray);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // 5. FXAA to the canvas
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(progFxaa.p);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, finalRT.t);
+  gl.uniform1i(progFxaa.u.uTex, 0);
+  gl.uniform2f(progFxaa.u.uTexel, 1 / W, 1 / H);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+resize();
+drawPattern();
+window.addEventListener("resize", resize);
+setTimeout(() => { document.getElementById("hint").style.opacity = "0"; }, 4000);
+requestAnimationFrame(now => { lastNow = now; frame(now); });
+</script>
+</body>
+</html>

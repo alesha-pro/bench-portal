@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FERROFLUID CROWN</title>
+<link rel="icon" href="data:,">
+<style>
+  html,body{margin:0;padding:0;background:#06080c;overflow:hidden;height:100%}
+  canvas{display:block;width:100vw;height:100vh;cursor:grab}
+  canvas:active{cursor:grabbing}
+  #hint{
+    position:fixed;left:50%;bottom:28px;transform:translateX(-50%);
+    color:rgba(190,220,240,.6);font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:.18em;text-transform:uppercase;pointer-events:none;white-space:nowrap;
+    transition:opacity 1.6s ease;user-select:none;
+  }
+  #lightind{
+    position:fixed;top:22px;left:50%;transform:translateX(-50%);
+    color:rgba(200,230,255,.55);font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:.22em;text-transform:uppercase;pointer-events:none;opacity:0;
+    transition:opacity .5s ease;user-select:none;white-space:nowrap;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hint">drag orbit &nbsp;·&nbsp; scroll zoom &nbsp;·&nbsp; click / hold to pulse &nbsp;·&nbsp; 1 / 2 / 3 spectrum &nbsp;·&nbsp; space pause</div>
+<div id="lightind"></div>
+<script>
+"use strict";
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', {antialias:false, alpha:false, depth:false, stencil:false, powerPreference:'high-performance'});
+if(!gl){ document.body.innerHTML='<p style="color:#9ab;font-family:monospace;padding:2em">WebGL2 required</p>'; throw new Error('no webgl2'); }
+const extFloat = gl.getExtension('EXT_color_buffer_float');
+const HDR_FORMAT = extFloat ? gl.RGBA16F : gl.RGBA8;
+
+const VERT = `#version 300 es
+precision highp float;
+out vec2 vUv;
+void main(){
+  vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2));
+  vUv = p;
+  gl_Position = vec4(p*2.0-1.0, 0.0, 1.0);
+}`;
+
+// ---------------------------- scene shader (raymarch, HDR linear out) ----------------------------
+const SCENE_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+
+uniform vec2  uRes;
+uniform float uTime;
+uniform vec3  uCamPos;
+uniform mat3  uCamMat;   // columns: right, up, forward
+uniform float uFov;      // tan(half vertical fov)
+uniform int   uPreset;   // 0 ice cyan, 1 molten orange, 2 prism
+uniform float uPulse;    // magnetic field strength 0..1
+uniform vec3  uLightDir; // rim light dir (world, toward light)
+
+#define MAX_STEPS 80
+#define MAX_DIST  30.0
+#define EPS 0.0012
+#define TAU 6.2831853
+
+const float RING_R = 2.1;
+const float RING_r = 0.10;
+const float FLOOR_Y = -1.3;
+
+// ---------- palette / preset ----------
+struct Preset { vec3 ringA; vec3 ringB; vec3 keyCol; vec3 rimCol; vec3 fill; vec3 sky; vec3 fog; };
+Preset presetInfo(int p){
+  if(p==0) return Preset(vec3(0.20,0.90,1.00), vec3(0.30,0.55,1.00), vec3(0.80,0.95,1.00), vec3(0.85,0.45,1.00), vec3(0.10,0.30,0.42), vec3(0.030,0.050,0.075), vec3(0.06,0.11,0.17));
+  if(p==1) return Preset(vec3(1.00,0.38,0.06), vec3(1.00,0.65,0.15), vec3(1.00,0.75,0.45), vec3(0.40,0.60,1.00), vec3(0.32,0.13,0.05), vec3(0.060,0.030,0.018), vec3(0.15,0.07,0.035));
+  return       Preset(vec3(1.00,0.25,0.55), vec3(0.25,1.00,0.75), vec3(1.00,0.92,0.88), vec3(0.55,0.70,1.00), vec3(0.16,0.11,0.32), vec3(0.035,0.028,0.060), vec3(0.08,0.07,0.15));
+}
+vec3 prismSweep(float t){
+  vec3 a = 0.5 + 0.5*cos(TAU*(t + vec3(0.0,0.33,0.67)));
+  return a*a;
+}
+
+// ---------- math ----------
+mat2 rot(float a){ float c=cos(a),s=sin(a); return mat2(c,-s,s,c); }
+
+// ---------- ferrofluid blob ----------
+// base sphere smooth-unioned with animated capped cones (true needle spikes).
+// Every primitive is a valid distance bound, so sphere tracing stays artifact-free.
+// Spike frames are computed on the CPU per frame and uploaded as uniforms.
+const float BLOB_BOUND = 2.0;
+const int   NSPIKE = 16;
+const float SPIKE_TIP_R = 0.012;
+const float SPIKE_BASE_R = 0.085;
+uniform vec4 uSpikes[NSPIKE];   // xyz = unit direction, w = height above unit sphere
+
+float smin(float a, float b, float k){
+  float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+  return mix(b, a, h) - k*h*(1.0-h);
+}
+
+// exact capped cone along unit axis u from a = u*0.8 (radius r1) to a + u*l (radius r2)
+float sdSpikeExact(vec3 p, vec3 u, float l, float r1, float r2){
+  vec3 pa = p - u*0.8;
+  float y = dot(pa, u);
+  float x = length(pa - u*y);
+  vec2 q = vec2(x, y - 0.5*l);
+  float h = 0.5*l;
+  vec2 k1 = vec2(r2, h);
+  vec2 k2 = vec2(r2-r1, 2.0*h);
+  vec2 ca = vec2(q.x - min(q.x, (q.y<0.0)?r1:r2), abs(q.y)-h);
+  vec2 cb = q - k1 + k2*clamp(dot(k1-q,k2)/dot(k2,k2), 0.0, 1.0);
+  float s = (cb.x<0.0 && ca.y<0.0) ? -1.0 : 1.0;
+  return s*sqrt(min(dot(ca,ca), dot(cb,cb)));
+}
+// marching version: bounding-sphere early-out (lower bound only, clamped so it can
+// never be read as a hit). Normals use sdSpikeExact because the bound makes the field
+// discontinuous at the bounding sphere, which would corrupt finite differences.
+float sdSpike(vec3 p, vec3 u, float l, float r1, float r2){
+  vec3 pa = p - u*0.8;
+  float db = length(pa - u*(0.5*l)) - (0.5*l + r1);
+  if(db > 0.0) return max(db, 0.02);
+  return sdSpikeExact(p, u, l, r1, r2);
+}
+
+float sdBlobExact(vec3 p, float t, float pulse){
+  float r = length(p);
+  vec3 n = p / max(r, 1e-5);
+  float wave = 0.025*sin(9.0*atan(n.z,n.x) + 6.0*n.y + t*3.0)
+             + 0.015*sin(14.0*n.y - t*4.0);
+  float d = r - (1.0 + wave);
+  for(int i=0;i<NSPIKE;i++){
+    vec4 s = uSpikes[i];
+    float ds = sdSpikeExact(p, s.xyz, 0.2 + s.w, SPIKE_BASE_R, SPIKE_TIP_R);
+    d = smin(d, ds, 0.05);
+  }
+  return d;
+}
+float sdBlob(vec3 p, float t, float pulse){
+  float r = length(p);
+  // bounding sphere early-out (lower bound only, never below a safe step)
+  if(r > BLOB_BOUND) return max(r - BLOB_BOUND, 0.02);
+  return sdBlobExact(p, t, pulse);
+}
+
+// ---------- torus ring ----------
+float sdTorus(vec3 p, float R, float r){
+  float q = length(p.xz) - R;
+  return length(vec2(q, p.y)) - r;
+}
+float ringTilt(float t){ return 0.14*sin(t*0.21); }
+float ringSpin(float t){ return t*0.35; }
+float sdRing(vec3 p, float t){
+  vec3 rp = p;
+  rp.xz = rot(ringSpin(t)) * rp.xz;
+  rp.xy = rot(ringTilt(t)) * rp.xy;
+  return sdTorus(rp, RING_R, RING_r);
+}
+vec3 ringNormal(vec3 p, float t){
+  vec3 rp = p;
+  rp.xz = rot(ringSpin(t)) * rp.xz;
+  rp.xy = rot(ringTilt(t)) * rp.xy;
+  float R = length(rp.xz);
+  vec2 dir = rp.xz / max(R, 1e-5);
+  vec3 n = normalize(vec3(dir.x*(R-RING_R), rp.y, dir.y*(R-RING_R)));
+  n.xy = rot(-ringTilt(t)) * n.xy;
+  n.xz = rot(-ringSpin(t)) * n.xz;
+  return n;
+}
+
+vec3 calcNormal(vec3 p, float t, float pulse){
+  // exact field only (no bounds) so finite differences stay clean
+  const vec2 e = vec2(0.0015, -0.0015);
+  vec3 bp = p - vec3(0.0, 0.08*sin(t*0.8), 0.0);
+  return normalize( e.xyy*sdBlobExact(bp+e.xyy,t,pulse)+e.yyx*sdBlobExact(bp+e.yyx,t,pulse)+
+                    e.yxy*sdBlobExact(bp+e.yxy,t,pulse)+e.xxx*sdBlobExact(bp+e.xxx,t,pulse));
+}
+
+// ---------- environment ----------
+vec3 envSky(vec3 d, Preset pr){
+  float up = d.y*0.5+0.5;
+  vec3 c = mix(pr.fog*0.12, pr.sky*0.3, up);
+  float hz = exp(-abs(d.y)*4.5);
+  c += mix(pr.ringA, pr.ringB, 0.5) * hz * 0.03;
+  float box = smoothstep(0.55,0.95,d.y);
+  c += vec3(0.9,0.95,1.0)*box*0.10;
+  return c;
+}
+
+vec3 ringColorAt(float ang, float t, Preset pr){
+  if(uPreset==2) return prismSweep(fract(ang/TAU + t*0.05)) * 1.3;
+  return mix(pr.ringA, pr.ringB, 0.5+0.5*sin(t*0.8+ang*2.0));
+}
+
+// analytic reflections in the glass floor (mirrored scene)
+vec3 floorReflections(vec3 p, vec3 R, float t, float pulse, Preset pr){
+  vec3 acc = vec3(0.0);
+  float bob = 0.08*sin(t*0.8);
+  // mirrored blob (sphere approx)
+  vec3 bc = vec3(0.0, 2.0*FLOOR_Y + bob, 0.0);
+  float br = 1.15+0.25*pulse;
+  vec3 oc = p - bc;
+  float b = dot(oc, R);
+  float c = dot(oc,oc) - br*br;
+  float disc = b*b - c;
+  if(disc > 0.0 && R.y < 0.0){
+    float s = -b - sqrt(disc);
+    if(s > 0.0){
+      vec3 hp = p + R*s;
+      vec3 hn = normalize(hp - bc);
+      float fres = pow(1.0 - max(dot(hn, -R), 0.0), 3.0);
+      vec3 rc = ringColorAt(atan(hp.z, hp.x), t, pr);
+      acc += (vec3(0.02,0.025,0.03) + rc*0.35*fres + pr.keyCol*0.10*fres) * 0.9;
+    }
+  }
+  // mirrored ring (thin circle on mirrored plane)
+  if(R.y < -0.02){
+    float s = (2.0*FLOOR_Y - p.y)/R.y;
+    vec3 hp = p + R*s;
+    float d = abs(length(hp.xz) - RING_R);
+    float g = exp(-d*d*40.0);
+    acc += ringColorAt(atan(hp.z,hp.x), t, pr) * g * 0.9;
+  }
+  return acc;
+}
+
+// ---------- shading ----------
+float pulseEnv(float p){ return 0.5+0.5*p; }
+
+vec3 shadeBlob(vec3 p, vec3 rd, vec3 n, float t, float pulse, Preset pr){
+  vec3 V = -rd;
+  float pe = pulseEnv(pulse);
+  // wet metallic black: body terms stay ~0.01 linear; only speculars go bright
+  vec3 col = vec3(0.004,0.0045,0.0055);
+  float ndv = max(dot(n,V), 0.0);
+
+  // ring as coloured area light: nearest point on the ring
+  float ang = atan(p.z, p.x);
+  vec3 ringPt = vec3(cos(ang), 0.0, sin(ang)) * RING_R;
+  vec3 Lr = ringPt - p;
+  float dL = length(Lr); Lr /= dL;
+  vec3 rc = ringColorAt(ang, t, pr);
+  float atten = 1.4/(0.6+dL*dL);
+  float ndl = max(dot(n,Lr),0.0);
+  vec3 Hr = normalize(Lr+V);
+  float ndh = max(dot(n,Hr),0.0);
+  col += rc * ndl * atten * 0.015 * (0.9+0.8*pe);         // faint coloured body
+  col += rc * pow(ndh, 24.0)  * atten * 0.09;              // broad wet sheen
+  col += rc * pow(ndh, 200.0) * atten * 2.6;               // tight chrome highlight
+
+  // key light (user adjustable) + opposite studio rim lamp
+  vec3 L = normalize(uLightDir);
+  vec3 H = normalize(L+V);
+  col += pr.keyCol * pow(max(dot(n,H),0.0), 260.0) * 3.0;
+  col += pr.keyCol * max(dot(n,L),0.0) * 0.012;
+  vec3 L2 = normalize(vec3(-uLightDir.x, uLightDir.y*0.8, -uLightDir.z));
+  vec3 H2 = normalize(L2+V);
+  col += pr.rimCol * pow(max(dot(n,H2),0.0), 140.0) * 2.0;
+  col += pr.rimCol * pow(1.0-ndv, 5.0) * 0.07;             // coloured edge
+
+  // environment reflection (Fresnel weighted)
+  vec3 R = reflect(rd, n);
+  float fres = pow(1.0 - ndv, 4.0);
+  col += envSky(R, pr) * (0.25 + 2.2*fres) * 0.35;
+
+  // iridescent sheen on spike tips
+  float tip = smoothstep(1.0, 1.5, length(p - vec3(0.0, 0.08*sin(t*0.8), 0.0)));
+  col += rc * tip * 0.02 * (0.6+0.8*pe);
+
+  // fill from below-front
+  col += pr.fill * max(dot(n, normalize(vec3(0.3,-0.6,0.75))),0.0) * 0.04;
+  return col;
+}
+
+vec3 shadeFloor(vec3 p, vec3 rd, float t, float pulse, Preset pr){
+  vec3 V = -rd;
+  vec3 n = vec3(0.0,1.0,0.0);
+  vec3 R = reflect(rd, n);
+  float cosV = max(dot(n,V),0.0);
+  float fres = 0.08 + 0.92*pow(1.0-cosV, 4.0);
+
+  vec3 col = vec3(0.006,0.007,0.009);
+  col += envSky(R, pr) * fres * 0.4;
+  col += floorReflections(p, R, t, pulse, pr) * (0.25 + 0.75*fres);
+
+  // faint etched grid
+  vec2 g = abs(fract(p.xz*0.5+0.5)-0.5);
+  float line = 1.0 - smoothstep(0.0, 0.02, min(g.x,g.y));
+  float fade = exp(-length(p.xz)*0.08);
+  col += mix(pr.ringA,pr.ringB,0.5) * line * 0.035 * fade;
+
+  // soft contact shadow under the blob
+  float ds = length(p.xz);
+  float shadow = 1.0 - 0.75*exp(-ds*ds*0.9);
+  col *= shadow;
+  // ring glow spill on the glass
+  float dr = abs(ds - RING_R);
+  col += ringColorAt(atan(p.z,p.x), t, pr) * exp(-dr*dr*3.0) * 0.10 * (0.6+pulseEnv(pulse));
+  return col;
+}
+
+vec3 shadeRing(vec3 p, vec3 rd, vec3 n, float t, float pulse, Preset pr){
+  vec3 V = -rd;
+  float ang = atan(p.z,p.x) - ringSpin(t);
+  vec3 rc = ringColorAt(ang, t, pr);
+  float fres = pow(1.0-abs(dot(n,V)), 2.0);
+  float energy = 0.55 + 0.5*pulseEnv(pulse);
+  return rc*energy + rc*fres*0.2 + vec3(0.008);
+}
+
+vec3 ACES(vec3 x){
+  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+}
+
+void main(){
+  Preset pr = presetInfo(uPreset);
+  vec2 uv = (gl_FragCoord.xy*2.0 - uRes)/uRes.y;
+  vec3 ro = uCamPos;
+  vec3 rd = normalize(uCamMat * normalize(vec3(uv*uFov, 1.0)));
+  float t = uTime;
+
+  // background
+  vec3 col = envSky(rd, pr);
+  float vig = smoothstep(1.6,0.3,length(uv*vec2(0.8,1.0)));
+  col *= 0.5+0.5*vig;
+
+  // floor distance (analytic)
+  float tFloor = (rd.y < -1e-4) ? (FLOOR_Y - ro.y)/rd.y : 1e9;
+  if(tFloor < 0.0) tFloor = 1e9;
+
+  // analytic test against the blob's bounding sphere: rays that miss it skip the
+  // expensive spike field entirely and only march the torus
+  vec3 bobC = vec3(0.0, 0.08*sin(t*0.8), 0.0);
+  vec3 oc = ro - bobC;
+  float ocB = dot(oc, rd);
+  float ocC = dot(oc,oc) - BLOB_BOUND*BLOB_BOUND;
+  float ocDisc = ocB*ocB - ocC;
+  bool blobPossible = (ocC < 0.0) || (ocDisc > 0.0 && (-ocB + sqrt(ocDisc)) > 0.0);
+
+  float hit = -1.0; float id = 0.0; float glow = 0.0;
+  float dO = 0.0;
+  for(int i=0;i<MAX_STEPS;i++){
+    vec3 pos = ro + rd*dO;
+    float dB = blobPossible ? sdBlob(pos - bobC, t, uPulse) : 1e5;
+    float dR = sdRing(pos, t);
+    if(dB < dR){ if(dB < EPS){ hit=dO; id=1.0; break; } }
+    else { if(dR < EPS){ hit=dO; id=2.0; break; } }
+    float stepLen = min(dB,dR)*0.85;
+    // line integral of the ring's glow (step-size weighted, no banding)
+    glow += exp(-abs(dR)*14.0)*stepLen*0.22*(1.0+uPulse);
+    dO += stepLen;
+    if(dO > min(MAX_DIST, tFloor+0.5)) break;
+  }
+  if(hit < 0.0 && tFloor < 1e8 && tFloor < MAX_DIST){ hit = tFloor; id = 3.0; }
+
+  if(hit > 0.0){
+    vec3 p = ro + rd*hit;
+    if(id==3.0)      col = shadeFloor(p, rd, t, uPulse, pr);
+    else if(id==2.0) col = shadeRing(p, rd, ringNormal(p,t), t, uPulse, pr);
+    else             col = shadeBlob(p, rd, calcNormal(p,t,uPulse), t, uPulse, pr);
+    float fog = 1.0-exp(-hit*0.03);
+    col = mix(col, pr.fog*(0.7+0.3*vig), fog*0.45);
+  }
+
+  // ring halo: distance from the ray to the ring circle (crossing of the ring plane,
+  // or closest horizontal approach for rays that never reach the plane)
+  {
+    float th = -dot(ro.xz, rd.xz)/max(dot(rd.xz,rd.xz), 1e-4);
+    float tc = (abs(rd.y) > 1e-3) ? -ro.y/rd.y : -1.0;
+    float tSel = (tc > 0.0) ? tc : th;
+    vec3 cp = ro + rd*max(tSel, 0.0);
+    float dd = length(vec2(length(cp.xz) - RING_R, cp.y));
+    float halo = exp(-dd*dd*2.0);
+    col += mix(pr.ringA,pr.ringB,0.5) * halo * 0.10 * (1.0+uPulse*0.8);
+  }
+  col += glow;
+
+  outColor = vec4(max(col, vec3(0.0)), 1.0);
+}
+`;
+
+// ---------------------------- bloom prefilter ----------------------------
+const PREFILTER_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex;
+void main(){
+  vec3 c = texture(uTex, vUv).rgb;
+  float l = dot(c, vec3(0.2126,0.7152,0.0722));
+  float k = smoothstep(0.2, 0.6, l);
+  o = vec4(c*k, 1.0);
+}`;
+
+const BLUR_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex; uniform vec2 uDir;
+void main(){
+  vec3 s = texture(uTex, vUv).rgb*0.227027;
+  s += texture(uTex, vUv+uDir*1.384615).rgb*0.316216;
+  s += texture(uTex, vUv-uDir*1.384615).rgb*0.316216;
+  s += texture(uTex, vUv+uDir*3.230769).rgb*0.070270;
+  s += texture(uTex, vUv-uDir*3.230769).rgb*0.070270;
+  o = vec4(s,1.0);
+}`;
+
+const COMPOSITE_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uScene; uniform sampler2D uBloom;
+uniform float uBloomAmt; uniform vec2 uRes;
+vec3 ACES(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+void main(){
+  vec2 uv = (vUv*2.0-1.0);
+  float vig = smoothstep(1.7,0.4,length(uv*vec2(0.85,1.0)));
+  vec3 c = texture(uScene, vUv).rgb * (0.55+0.45*vig);
+  vec3 b = texture(uBloom, vUv).rgb;
+  c += b*uBloomAmt;
+  c = ACES(c*1.1);
+  c = pow(c, vec3(1.0/2.2));
+  // lift darks, never pure black
+  c = max(c, vec3(0.030,0.036,0.046)*(0.4+0.6*vig));
+  o = vec4(c,1.0);
+}`;
+
+const FXAA_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex; uniform vec2 uRes;
+void main(){
+  vec2 rcp = 1.0/uRes;
+  vec3 nw = texture(uTex, vUv+vec2(-1.,-1.)*rcp).rgb;
+  vec3 ne = texture(uTex, vUv+vec2( 1.,-1.)*rcp).rgb;
+  vec3 sw = texture(uTex, vUv+vec2(-1., 1.)*rcp).rgb;
+  vec3 se = texture(uTex, vUv+vec2( 1., 1.)*rcp).rgb;
+  vec3 M  = texture(uTex, vUv).rgb;
+  float lNW=dot(nw,vec3(0.299,0.587,0.114));
+  float lNE=dot(ne,vec3(0.299,0.587,0.114));
+  float lSW=dot(sw,vec3(0.299,0.587,0.114));
+  float lSE=dot(se,vec3(0.299,0.587,0.114));
+  float lM =dot(M ,vec3(0.299,0.587,0.114));
+  float lMin=min(lM,min(min(lNW,lNE),min(lSW,lSE)));
+  float lMax=max(lM,max(max(lNW,lNE),max(lSW,lSE)));
+  vec2 dir=vec2(-((lNW+lNE)-(lSW+lSE)),((lNW+lSW)-(lNE+lSE)));
+  float dirReduce=max((lNW+lNE+lSW+lSE)*0.03125,0.0078125);
+  float rcpDirMin=1.0/(min(abs(dir.x),abs(dir.y))+dirReduce);
+  dir=clamp(dir*rcpDirMin,-8.0,8.0)*rcp;
+  vec3 A=0.5*(texture(uTex,vUv+dir*(1.0/3.0-0.5)).rgb+texture(uTex,vUv+dir*(2.0/3.0-0.5)).rgb);
+  vec3 B=A*0.5+0.25*(texture(uTex,vUv+dir*-0.5).rgb+texture(uTex,vUv+dir*0.5).rgb);
+  float lB=dot(B,vec3(0.299,0.587,0.114));
+  o=(lB<lMin||lB>lMax)? vec4(A,1.0):vec4(B,1.0);
+}`;
+
+// ---------------------------- GL helpers ----------------------------
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)+'\n'+src);
+  return s;
+}
+function program(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+const progScene  = program(VERT, SCENE_FRAG);
+const progPre    = program(VERT, PREFILTER_FRAG);
+const progBlur   = program(VERT, BLUR_FRAG);
+const progComp   = program(VERT, COMPOSITE_FRAG);
+const progFXAA   = program(VERT, FXAA_FRAG);
+const U = (p,n)=>gl.getUniformLocation(p,n);
+const uScene = {
+  res:U(progScene,'uRes'), time:U(progScene,'uTime'), camPos:U(progScene,'uCamPos'),
+  camMat:U(progScene,'uCamMat'), fov:U(progScene,'uFov'), preset:U(progScene,'uPreset'),
+  pulse:U(progScene,'uPulse'), lightDir:U(progScene,'uLightDir'), spikes:U(progScene,'uSpikes[0]')
+};
+const NSPIKE = 16;
+const spikeData = new Float32Array(NSPIKE*4);
+// crown-like distribution: dense over the top and equator, none underneath.
+// The whole set drifts with the ring spin, each needle wobbles and breathes.
+function updateSpikes(t, pulse){
+  for(let i=0;i<NSPIKE;i++){
+    const fi=i+0.5;
+    const y=0.95-1.35*fi/NSPIKE, rr=Math.sqrt(Math.max(1-y*y,0)), ph=fi*2.39996323;
+    let dx=Math.cos(ph)*rr, dy=y, dz=Math.sin(ph)*rr;
+    const A=t*0.30+0.22*Math.sin(t*0.6+fi), cA=Math.cos(A), sA=Math.sin(A);
+    let nx=cA*dx-sA*dz, nz=sA*dx+cA*dz; dx=nx; dz=nz;
+    const B=0.14*Math.sin(t*0.8+fi*1.3), cB=Math.cos(B), sB=Math.sin(B);
+    nx=cB*dx-sB*dy; let ny=sB*dx+cB*dy; dx=nx; dy=ny;
+    const h=Math.max(0.45+0.14*Math.sin(t*1.25+fi*1.9)+0.10*Math.sin(t*0.7+fi*0.7)+0.32*pulse, -0.1);
+    spikeData[i*4]=dx; spikeData[i*4+1]=dy; spikeData[i*4+2]=dz; spikeData[i*4+3]=h;
+  }
+}
+const uPre = {tex:U(progPre,'uTex')};
+const uBlur = {tex:U(progBlur,'uTex'), dir:U(progBlur,'uDir')};
+const uComp = {scene:U(progComp,'uScene'), bloom:U(progComp,'uBloom'), amt:U(progComp,'uBloomAmt')};
+const uFX = {tex:U(progFXAA,'uTex'), res:U(progFXAA,'uRes')};
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+function drawFull(){ gl.drawArrays(gl.TRIANGLES, 0, 3); }
+
+// ---------------------------- render targets ----------------------------
+function makeTex(w,h,format){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texStorage2D(gl.TEXTURE_2D,1,format,w,h);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function makeFb(t){
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if(st !== gl.FRAMEBUFFER_COMPLETE) console.warn('framebuffer incomplete', st);
+  return f;
+}
+let W=0,H=0, SW=0, SH=0;
+let fbScene, fbA, fbB, fbComp, texScene, texA, texB, texComp;
+function allocTargets(){
+  [fbScene,fbA,fbB,fbComp].forEach(f=>f&&gl.deleteFramebuffer(f));
+  [texScene,texA,texB,texComp].forEach(t=>t&&gl.deleteTexture(t));
+  SW=Math.max(2,Math.round(W*renderScale)); SH=Math.max(2,Math.round(H*renderScale));
+  texScene=makeTex(SW,SH,HDR_FORMAT); fbScene=makeFb(texScene);
+  const bw=Math.max(2,SW>>1), bh=Math.max(2,SH>>1);
+  texA=makeTex(bw,bh,HDR_FORMAT); fbA=makeFb(texA);
+  texB=makeTex(bw,bh,HDR_FORMAT); fbB=makeFb(texB);
+  texComp=makeTex(W,H,gl.RGBA8); fbComp=makeFb(texComp);
+}
+let renderScale = 1.0;
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio||1, 1.5);
+  const w = Math.max(2, Math.floor(canvas.clientWidth*dpr));
+  const h = Math.max(2, Math.floor(canvas.clientHeight*dpr));
+  if(w===W && h===H) return;
+  W=w; H=h; canvas.width=w; canvas.height=h;
+  allocTargets();
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------- camera & interaction ----------------------------
+let camYaw = 0.6, camPitch = 0.24, camDist = 5.8;
+let targYaw = camYaw, targPitch = camPitch, targDist = camDist;
+let autoOrbit = true, resumeAt = 0;
+let paused = false;
+let pulse = 0.0, pulseTarget = 0.0, holdPulse = false;
+let preset = 0;
+let simTime = 0.0;
+const lightBase = [0.9, 0.6];
+let lightUser = [0,0];
+function lightDirVec(){
+  const yaw = lightBase[0] + lightUser[0]*1.6;
+  const pit = lightBase[1] + lightUser[1]*1.1;
+  return [Math.cos(pit)*Math.cos(yaw), Math.sin(pit), Math.cos(pit)*Math.sin(yaw)];
+}
+let lightDir = lightDirVec();
+
+const hint = document.getElementById('hint');
+const lightind = document.getElementById('lightind');
+setTimeout(()=>{ hint.style.opacity = '0'; }, 4200);
+let indTimer = 0;
+function indicator(msg, ms){
+  lightind.textContent = msg;
+  lightind.style.opacity = '1';
+  clearTimeout(indTimer);
+  if(ms) indTimer = setTimeout(()=>{ lightind.style.opacity = '0'; }, ms);
+}
+function hideIndicator(){ clearTimeout(indTimer); lightind.style.opacity='0'; }
+
+const cam = {};
+function camBasis(yaw,pitch,dist){
+  const cp=Math.cos(pitch), sp=Math.sin(pitch);
+  const pos=[Math.cos(yaw)*cp*dist, sp*dist+0.2, Math.sin(yaw)*cp*dist];
+  const target=[0,0.0,0];
+  let fwd=[target[0]-pos[0],target[1]-pos[1],target[2]-pos[2]];
+  const fl=Math.hypot(...fwd)||1; fwd=[fwd[0]/fl,fwd[1]/fl,fwd[2]/fl];
+  let right=[-fwd[2], 0, fwd[0]];
+  const rl=Math.hypot(...right)||1; right=[right[0]/rl,right[1]/rl,right[2]/rl];
+  const up=[right[1]*fwd[2]-right[2]*fwd[1], right[2]*fwd[0]-right[0]*fwd[2], right[0]*fwd[1]-right[1]*fwd[0]];
+  cam.pos=pos; cam.right=right; cam.up=up; cam.fwd=fwd;
+}
+
+let dragging=false, draggingLight=false, dragStart=[0,0], yawStart=0, pitchStart=0, lightStart=[0,0];
+let moved=0;
+canvas.addEventListener('pointerdown', e=>{
+  canvas.setPointerCapture(e.pointerId);
+  dragStart=[e.clientX,e.clientY]; moved=0;
+  if(e.button===2 || e.shiftKey){
+    draggingLight=true; lightStart=lightUser.slice();
+    indicator('rim light adjust · R reset', 0);
+  } else {
+    dragging=true; yawStart=targYaw; pitchStart=targPitch; holdPulse=true;
+  }
+});
+canvas.addEventListener('pointermove', e=>{
+  const dx=e.clientX-dragStart[0], dy=e.clientY-dragStart[1];
+  moved=Math.max(moved, Math.hypot(dx,dy));
+  if(draggingLight){
+    lightUser=[Math.max(-1,Math.min(1,lightStart[0]+dx*0.004)), Math.max(-1,Math.min(1,lightStart[1]+dy*0.004))];
+    lightDir=lightDirVec();
+  } else if(dragging){
+    targYaw = yawStart + dx*0.006;
+    targPitch = Math.max(-0.1, Math.min(1.3, pitchStart + dy*0.005));
+    if(moved>3) holdPulse=false;
+  }
+});
+function endDrag(){
+  if(dragging && moved<=3) pulseTarget=1.0;
+  dragging=false; draggingLight=false; holdPulse=false;
+  resumeAt = performance.now()+2200;
+}
+window.addEventListener('pointerup', endDrag);
+window.addEventListener('pointercancel', endDrag);
+window.addEventListener('contextmenu', e=>e.preventDefault());
+canvas.addEventListener('wheel', e=>{
+  e.preventDefault();
+  targDist = Math.max(3.6, Math.min(12.0, targDist + e.deltaY*0.004));
+  resumeAt = performance.now()+2200;
+}, {passive:false});
+
+function setPreset(p){
+  preset=p;
+  indicator('spectrum: '+['ICE CYAN','MOLTEN ORANGE','PRISM SWEEP'][p], 1100);
+}
+window.addEventListener('keydown', e=>{
+  if(e.code==='Space'){ e.preventDefault(); paused=!paused; indicator(paused?'paused':'resumed', 900); }
+  else if(e.key==='1') setPreset(0);
+  else if(e.key==='2') setPreset(1);
+  else if(e.key==='3') setPreset(2);
+  else if(e.key==='l'||e.key==='L'){
+    if(lightUser[0]===0&&lightUser[1]===0){ lightUser=[0.35,-0.1]; } else { lightUser=[0,0]; }
+    lightDir=lightDirVec();
+    indicator(lightUser[0]||lightUser[1] ? 'rim light shifted · R reset' : 'rim light reset', 1100);
+  }
+  else if(e.key==='r'||e.key==='R'){ lightUser=[0,0]; lightDir=lightDirVec(); hideIndicator(); }
+});
+
+// ---------------------------- frame loop ----------------------------
+let lastT = performance.now(), frames=0, fpsT=lastT, fps=0;
+let emaFrame = 16, adaptT = lastT, adaptCool = 0;
+function frame(){
+  requestAnimationFrame(frame);
+  const now = performance.now();
+  let dt = Math.min((now-lastT)/1000, 0.05); lastT=now;
+  if(!paused){
+    simTime += dt;
+    if(autoOrbit && !dragging) targYaw += dt*0.165;   // one orbit ~38 s
+  }
+  if(!autoOrbit && now > resumeAt && !dragging){ autoOrbit = true; }
+  camYaw   += (targYaw-camYaw)*Math.min(1,dt*4.0);
+  camPitch += (targPitch-camPitch)*Math.min(1,dt*4.0);
+  camDist  += (targDist-camDist)*Math.min(1,dt*4.0);
+  pulseTarget = Math.max(0.0, pulseTarget - dt*1.3);
+  if(holdPulse) pulseTarget = 1.0;
+  pulse += (pulseTarget-pulse)*Math.min(1,dt*5.0);
+  camBasis(camYaw, camPitch, camDist);
+
+  resize();
+
+  // 1) scene (HDR) at SW x SH
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbScene);
+  gl.viewport(0,0,SW,SH);
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+  gl.useProgram(progScene);
+  gl.uniform2f(uScene.res, SW, SH);
+  gl.uniform1f(uScene.time, simTime);
+  gl.uniform3f(uScene.camPos, cam.pos[0],cam.pos[1],cam.pos[2]);
+  gl.uniformMatrix3fv(uScene.camMat, false, [cam.right[0],cam.right[1],cam.right[2], cam.up[0],cam.up[1],cam.up[2], cam.fwd[0],cam.fwd[1],cam.fwd[2]]);
+  gl.uniform1f(uScene.fov, Math.tan(0.5*40*Math.PI/180));
+  gl.uniform1i(uScene.preset, preset);
+  gl.uniform1f(uScene.pulse, pulse);
+  gl.uniform3f(uScene.lightDir, lightDir[0],lightDir[1],lightDir[2]);
+  updateSpikes(simTime, pulse);
+  gl.uniform4fv(uScene.spikes, spikeData);
+  drawFull();
+
+  // 2) bloom prefilter -> A (half res)
+  const bw=Math.max(2,SW>>1), bh=Math.max(2,SH>>1);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbA);
+  gl.viewport(0,0,bw,bh);
+  gl.useProgram(progPre);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texScene);
+  gl.uniform1i(uPre.tex, 0);
+  drawFull();
+
+  // 3) blur H: A -> B
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbB);
+  gl.useProgram(progBlur);
+  gl.bindTexture(gl.TEXTURE_2D, texA);
+  gl.uniform1i(uBlur.tex, 0);
+  gl.uniform2f(uBlur.dir, 2.0/bw, 0.0);
+  drawFull();
+  // 4) blur V: B -> A
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbA);
+  gl.bindTexture(gl.TEXTURE_2D, texB);
+  gl.uniform2f(uBlur.dir, 0.0, 2.0/bh);
+  drawFull();
+
+  // 5) composite + tone map -> full res
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbComp);
+  gl.viewport(0,0,W,H);
+  gl.useProgram(progComp);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texScene);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texA);
+  gl.uniform1i(uComp.scene, 0);
+  gl.uniform1i(uComp.bloom, 1);
+  gl.uniform1f(uComp.amt, 0.25);
+  drawFull();
+
+  // 6) FXAA -> screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0,0,W,H);
+  gl.useProgram(progFXAA);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texComp);
+  gl.uniform1i(uFX.tex, 0);
+  gl.uniform2f(uFX.res, W, H);
+  drawFull();
+
+  // adaptive scene resolution (keeps ~60 fps on weaker GPUs)
+  const ft = now - (frame._t||now); frame._t = now;
+  emaFrame = emaFrame*0.9 + Math.min(ft,100)*0.1;
+  frames++;
+  if(now-fpsT>1000){ fps=frames*1000/(now-fpsT); frames=0; fpsT=now; }
+  if(now-adaptT > 1200 && W>0){
+    adaptT=now;
+    let next=renderScale;
+    if(emaFrame > 19 && renderScale > 0.45) next = Math.max(0.45, renderScale-0.15);
+    else if(emaFrame < 17.5 && renderScale < 1.0){ adaptCool++; if(adaptCool>=6){ next=Math.min(1.0, renderScale+0.1); adaptCool=0; } }
+    else adaptCool=0;
+    if(next!==renderScale){ renderScale=next; allocTargets(); }
+  }
+}
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "slug": "ferrofluid-ring-factory",
+  "title": "Ferrofluid Crown",
+  "category": "visuals",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "A raymarched WebGL2 magnetic ferrofluid crown with animated needle spikes, an illuminated torus ring, and glass-floor reflections.",
+  "description": "A single-file WebGL2 SDF raymarching experiment depicting a liquid-metal ferrofluid crown studded with animated magnetic spikes around a glowing torus ring above a reflective dark glass floor, complete with HDR bloom and FXAA. Drag to orbit, scroll to zoom, click or hold to pulse the magnetic field, press 1–3 for spectrum presets (Ice Cyan, Molten Orange, Prism Sweep), L or Right Drag for the rim light, R to reset, and Space to pause.",
+  "accent": "#33e6ff",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "SDF",
+    "Bloom"
+  ],
+  "cover": "cover.webp"
+}

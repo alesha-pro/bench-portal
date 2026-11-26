@@ -1,0 +1,18 @@
+{
+  "slug": "pocket-watch-world-factory",
+  "title": "Watchwork World",
+  "category": "showcases",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "A procedural WebGL2 miniature world built inside an open brass pocket watch, complete with ticking hands, bioluminescent trees, and a cascading waterfall.",
+  "description": "A single-file WebGL2 3D showcase with zero external assets depicting an open engraved pocket watch housing a miniature landscape with moving watch hands, glowing trees, an animated waterfall and pool, starfield and aurora sky dome, drifting particles, and ACES bloom. Drag to orbit, wheel to zoom, press 1–3 for atmosphere modes (Starry Midnight, Golden Hour, Aurora Borealis), Right Drag or L to adjust light level, R to reset, and Space to pause.",
+  "accent": "#f3c86b",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "3D",
+    "Water",
+    "Bloom"
+  ],
+  "cover": "cover.webp"
+}

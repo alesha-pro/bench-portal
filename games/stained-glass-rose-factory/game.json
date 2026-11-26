@@ -1,0 +1,18 @@
+{
+  "slug": "stained-glass-rose-factory",
+  "title": "Rose Window",
+  "category": "visuals",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "A raymarched WebGL2 gothic stone alcove illuminated by colored god rays streaming through a procedural stained-glass rose window.",
+  "description": "A single-file WebGL2 raymarched architectural scene featuring a vaulted stone apse and procedural lead-tracery rose window that projects colored stained-glass light, volumetric sunbeams, and drifting dust motes onto the stone floor. Drag to orbit, wheel to zoom, press 1–3 for lighting presets (Golden Sunset, High Noon, Pale Moonlight), Right Drag, Shift+Drag, or L to aim the light, R to reset, and Space to pause.",
+  "accent": "#ff9442",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "Volumetrics",
+    "Optics"
+  ],
+  "cover": "cover.webp"
+}

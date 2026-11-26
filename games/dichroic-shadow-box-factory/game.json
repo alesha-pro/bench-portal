@@ -1,0 +1,18 @@
+{
+  "slug": "dichroic-shadow-box-factory",
+  "title": "Dichroic Shadow Box",
+  "category": "visuals",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "An interactive WebGL2 shadow box with a rotating dichroic glass icosahedron, refracted light paths, and photon-mapped wall caustics.",
+  "description": "A single-file WebGL2 optical scene with zero external assets. Renders a rotating dichroic glass icosahedron suspended inside an enclosed shadow box using analytic slab intersection, angle-dependent interference coatings, a 6-tile photon-mapped caustic atlas, volumetric light beams, and ACES bloom. Drag to orbit, wheel to zoom, press 1–3 for lighting presets, Right Drag or L to move the light, R to reset, and Space to pause.",
+  "accent": "#2ce6d0",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Caustics",
+    "Optics",
+    "Bloom"
+  ],
+  "cover": "cover.webp"
+}

@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watchwork World</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; background: #07070c; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  #hint {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+    color: #e9dfc8; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    letter-spacing: 0.06em; text-align: center; white-space: nowrap;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.9); pointer-events: none;
+    opacity: 0; transition: opacity 1.4s ease;
+  }
+  #hint.show { opacity: 0.85; }
+  #light-indicator {
+    position: fixed; right: 18px; bottom: 22px; width: 112px; height: 4px;
+    border-radius: 2px; background: rgba(255,255,255,0.14); pointer-events: none;
+    opacity: 0; transition: opacity 0.6s ease;
+  }
+  #light-indicator.show { opacity: 1; }
+  #light-indicator .bar {
+    position: absolute; top: 0; left: 0; height: 100%; width: 50%;
+    border-radius: 2px; background: linear-gradient(90deg, #f3c86b, #fff1c9);
+    box-shadow: 0 0 8px rgba(243,200,107,0.7);
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hint"></div>
+<div id="light-indicator"><div class="bar"></div></div>
+<script>
+"use strict";
+(() => {
+
+// ---------------------------------------------------------------- shaders
+const VERT = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNor;
+layout(location=2) in vec3 aCol;
+uniform mat4 uProj, uView, uModel;
+uniform mat3 uNormal;
+out vec3 vWorld; out vec3 vNor; out vec3 vCol;
+void main() {
+  vec4 w = uModel * vec4(aPos, 1.0);
+  vWorld = w.xyz; vNor = normalize(uNormal * aNor); vCol = aCol;
+  gl_Position = uProj * uView * w;
+}`;
+
+const FRAG = `#version 300 es
+precision highp float;
+in vec3 vWorld; in vec3 vNor; in vec3 vCol;
+uniform vec3 uCam, uSunDir, uSunCol, uSky, uGround;
+uniform vec3 uLPos[5];
+uniform vec3 uLCol[5];
+uniform vec3 uFog;
+uniform float uRough, uMetal, uEmissive, uAlpha, uTime, uRim, uLightMul, uFade;
+out vec4 o;
+
+const float PI = 3.14159265;
+
+vec3 fresnelSchlick(float c, vec3 f0) { return f0 + (1.0 - f0) * pow(clamp(1.0 - c, 0.0, 1.0), 5.0); }
+float D_GGX(float NoH, float a) { float a2 = a * a; float d = NoH * NoH * (a2 - 1.0) + 1.0; return a2 / (PI * d * d + 1e-5); }
+float G_Smith(float NoV, float NoL, float r) { float k = (r + 1.0) * (r + 1.0) / 8.0; return (NoV / (NoV * (1.0 - k) + k)) * (NoL / (NoL * (1.0 - k) + k)); }
+
+vec3 envColor(vec3 d) {
+  float h = clamp(d.y * 0.5 + 0.5, 0.0, 1.0);
+  vec3 c = mix(uGround, uSky, pow(h, 0.8));
+  float s = max(dot(d, uSunDir), 0.0);
+  c += uSunCol * pow(s, 24.0) * 0.6;
+  return c;
+}
+
+void main() {
+  vec3 N = normalize(vNor);
+  vec3 V = normalize(uCam - vWorld);
+  if (uMetal < 0.5) { /* two sided */ if (dot(N, V) < 0.0) N = -N; }
+  vec3 base = vCol;
+  vec3 Lo = vec3(0.0);
+  float NoV = max(dot(N, V), 1e-3);
+  vec3 F0 = mix(vec3(0.04), base, uMetal);
+  for (int i = 0; i < 5; i++) {
+    vec3 Ld = uLPos[i] - vWorld; float dist = length(Ld); Ld /= dist;
+    float att = 1.0 / (1.0 + 0.14 * dist * dist);
+    vec3 radiance = uLCol[i] * att * uLightMul;
+    vec3 H = normalize(Ld + V);
+    float NoL = max(dot(N, Ld), 0.0);
+    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+    float D = D_GGX(max(dot(N, H), 0.0), uRough);
+    float G = G_Smith(NoV, NoL, uRough);
+    vec3 spec = (D * G) * F / (4.0 * NoV * NoL + 1e-4);
+    vec3 kd = (vec3(1.0) - F) * (1.0 - uMetal);
+    Lo += (kd * base / PI + spec) * radiance * NoL;
+  }
+  // sun
+  {
+    vec3 Ld = normalize(uSunDir);
+    float NoL = max(dot(N, Ld), 0.0);
+    vec3 H = normalize(Ld + V);
+    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+    float D = D_GGX(max(dot(N, H), 0.0), uRough);
+    float G = G_Smith(NoV, NoL, uRough);
+    vec3 spec = (D * G) * F / (4.0 * NoV * NoL + 1e-4);
+    vec3 kd = (vec3(1.0) - F) * (1.0 - uMetal);
+    Lo += (kd * base / PI + spec) * uSunCol * NoL;
+  }
+  vec3 R = reflect(-V, N);
+  vec3 irr = envColor(N);
+  vec3 diff = irr * base;
+  vec3 spec = envColor(R) * fresnelSchlick(NoV, F0) * mix(0.08, 1.0, uMetal) * (1.0 - uRough * 0.75);
+  vec3 amb = (diff + spec) * mix(0.35, 1.0, uMetal);
+
+  vec3 col = Lo + amb;
+  float rim = pow(1.0 - NoV, 3.0) * uRim;
+  col += uSunCol * rim * 0.5 + envColor(R) * rim * 0.3;
+  col += base * uEmissive;
+  float fd = distance(uCam, vWorld);
+  col = mix(col, uFog, 1.0 - exp(-fd * fd * 0.0015));
+  col = max(col, vec3(0.0));
+  if (any(isnan(col))) col = vec3(0.0);
+  // radial alpha fade (velvet dissolves into the night sky)
+  float fade = mix(1.0, 1.0 - smoothstep(9.0, 15.5, length(vWorld.xz)), uFade);
+  if (fade <= 0.002) discard;
+  o = vec4(col, uAlpha * fade);
+}`;
+
+// Fullscreen triangle passes
+const FS_VERT = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+out vec2 vUv; out vec2 vPx;
+void main() {
+  vec2 p = vec2((gl_VertexID == 1) ? 3.0 : -1.0, (gl_VertexID == 2) ? 3.0 : -1.0);
+  vUv = p * 0.5 + 0.5;
+  vPx = vUv * vec2(textureSize(uTex, 0));
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+const SKY_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform mat4 uInvVP;
+uniform vec3 uCam;
+uniform float uTime;
+uniform vec3 uTop, uMid, uHor, uSunDir, uSunCol, uFogCol;
+uniform float uStars, uAurora;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
+// value noise on a ring: n cells per full turn, so it is periodic in azimuth (no seam at ±pi).
+// Quintic fade makes it C2: curtains are smooth curves, never lattice facets.
+float ringNoise(float x, float n) {
+  float i = floor(x), f = fract(x);
+  f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(hash11(mod(i, n) + 1.0), hash11(mod(i + 1.0, n) + 1.0), f);
+}
+float ringFbm(float x, float n) {
+  float v = 0.0, a = 0.5;
+  for (int k = 0; k < 4; k++) { v += a * ringNoise(x, n); x = 2.0 * x + 0.37 * n; n *= 2.0; a *= 0.5; }
+  return v * 1.0667;
+}
+
+void main() {
+  vec4 w = uInvVP * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 dir = normalize(w.xyz / w.w - uCam);
+  float y = dir.y;
+  vec3 col;
+  if (y >= 0.0) {
+    float t = pow(clamp(y, 0.0, 1.0), 0.45);
+    col = mix(uHor, uMid, smoothstep(0.0, 0.5, t));
+    col = mix(col, uTop, smoothstep(0.4, 1.0, t));
+  } else {
+    col = mix(uFogCol, uHor, smoothstep(-0.12, 0.0, y));
+    col *= 1.0 - 0.35 * smoothstep(0.0, -0.4, y);
+  }
+  // stars
+  if (uStars > 0.001) {
+    vec3 sd = dir * 180.0;
+    vec2 sp = sd.xz / (1.0 + abs(dir.y) * 1.5) + dir.y * 40.0;
+    vec2 cell = floor(sp);
+    float h = hash(cell);
+    if (h > 0.965 && y > -0.32) {
+      vec2 f = fract(sp) - 0.5;
+      float d = length(f);
+      float tw = 0.65 + 0.35 * sin(uTime * (1.5 + h * 4.0) + h * 60.0);
+      float star = exp(-d * d * 38.0) * tw * smoothstep(-0.34, -0.06, y);
+      col += vec3(0.9, 0.95, 1.0) * star * 1.6 * uStars;
+    }
+  }
+  if (uAurora > 0.001) {
+    // Curtains hanging from meandering arcs above the horizon: a sharp bright lower border, vertical
+    // rays that fade upward, and a fainter second veil behind. Every term is a smooth function of
+    // azimuth (ring noise, no seam) and elevation, so nothing in it has corners or facets.
+    float el = asin(clamp(y, -1.0, 1.0));
+    float u = atan(dir.z, dir.x) * 0.15915494;   // turns around the horizon
+    float t = uTime;
+    float band = 0.3 + 0.7 * smoothstep(0.3, 0.62, ringFbm(u * 3.0 + 0.71, 3.0));
+    // main curtain
+    float foot = -0.06 + 0.11 * (ringFbm(u * 7.0 + 0.13 + t * 0.004, 7.0) - 0.5) * 2.0 + 0.04 * (ringNoise(u * 19.0 - t * 0.01, 19.0) - 0.5) * 2.0;
+    float h = el - foot;
+    float ray = ringFbm(u * 240.0 + t * 0.04, 240.0);            // ~1.5 deg wide striations, drifting along the curtain
+    float top = 0.16 + 0.22 * ringFbm(u * 29.0 + 5.3 + t * 0.008, 29.0) + 0.08 * ray;
+    float up = max(h, 0.0) / top;
+    float lit = 0.3 + 0.7 * ray;
+    float I = (exp(-up * 1.6) * lit * smoothstep(-0.006, 0.008, h)              // ray body
+             + 0.9 * exp(-max(h, 0.0) * 40.0) * lit * smoothstep(-0.004, 0.004, h)  // bright hem
+             + 0.4 * exp(min(h, 0.0) * 5.0) * lit                                // the rays echoed in the haze below
+             + 0.18 * exp(-abs(h) * 3.0)) * band;                                // broad airglow around the curtain
+    // colour: green hem, violet sections, cooler towards the ray tops, a crimson fringe in places
+    float hue = ringFbm(u * 2.0 + 0.37, 2.0);
+    vec3 ac = mix(vec3(0.2, 1.0, 0.55), vec3(0.3, 0.9, 0.8), smoothstep(0.45, 0.6, hue));
+    ac = mix(ac, vec3(0.5, 0.45, 1.0), smoothstep(0.58, 0.78, hue) * 0.7);
+    ac = mix(ac, vec3(0.35, 0.8, 0.95), smoothstep(0.15, 0.7, up));
+    ac = mix(ac, vec3(0.65, 0.35, 1.0), smoothstep(0.6, 1.3, up));
+    float fringe = smoothstep(0.004, -0.004, h) * exp(min(h, 0.0) * 50.0) * smoothstep(0.5, 0.7, ringNoise(u * 9.0 + 3.1, 9.0));
+    ac = mix(ac, vec3(1.0, 0.4, 0.6), fringe * 0.6);
+    col += ac * I * 1.25 * uAurora;
+    // second veil: higher, fainter, slower, more violet
+    float foot2 = 0.2 + 0.14 * (ringFbm(u * 5.0 + 0.47 - t * 0.003, 5.0) - 0.5);
+    float h2 = el - foot2;
+    float ray2 = ringFbm(u * 90.0 + 7.7 - t * 0.012, 90.0);
+    float up2 = max(h2, 0.0) / (0.25 + 0.2 * ringFbm(u * 13.0 + 2.1, 13.0));
+    float I2 = exp(-up2 * 1.4) * (0.2 + 0.8 * ray2) * smoothstep(-0.01, 0.015, h2) * band;
+    col += mix(vec3(0.3, 0.75, 0.9), vec3(0.7, 0.4, 1.0), clamp(up2, 0.0, 1.0)) * I2 * 0.5 * uAurora;
+  }
+  // moon / sun glow
+  float s = max(dot(dir, uSunDir), 0.0);
+  col += uSunCol * pow(s, 180.0) * 1.5;
+  col += uSunCol * pow(s, 14.0) * 0.18;
+  o = vec4(col, 1.0);
+}`;
+
+const BRIGHT_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; in vec2 vPx; out vec4 o;
+uniform sampler2D uTex;
+void main() {
+  vec3 c = texture(uTex, vUv).rgb;
+  if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float k = smoothstep(0.8, 2.0, l);
+  o = vec4(c * k, 1.0);
+}`;
+
+const BLUR_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; in vec2 vPx; out vec4 o;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main() {
+  vec2 px = uDir / vPx;
+  vec3 c = texture(uTex, vUv).rgb * 0.227027;
+  c += texture(uTex, vUv + px * 1.384615).rgb * 0.316216;
+  c += texture(uTex, vUv - px * 1.384615).rgb * 0.316216;
+  c += texture(uTex, vUv + px * 3.230769).rgb * 0.070270;
+  c += texture(uTex, vUv - px * 3.230769).rgb * 0.070270;
+  o = vec4(c, 1.0);
+}`;
+
+const FINAL_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; in vec2 vPx; out vec4 o;
+uniform sampler2D uTex, uBloom;
+uniform float uExposure, uBloomAmt, uTime, uVignette;
+uniform vec3 uTint;
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+void main() {
+  vec4 s = texture(uTex, vUv);
+  vec3 c = s.rgb;
+  c += texture(uBloom, vUv).rgb * uBloomAmt;
+  if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+  c = min(c, vec3(48.0));
+  c *= uExposure;
+  c = aces(c);
+  // never crush to black: soft lift
+  c = c * 0.955 + vec3(0.012, 0.013, 0.02);
+  float d = length(vUv - 0.5) * 1.25;
+  c *= mix(1.0, 0.62, smoothstep(0.35, 1.05, d) * uVignette);
+  c = mix(c, c * uTint, 0.5);
+  // gamma + dither (kills banding in soft glows)
+  c = pow(max(c, 0.0), vec3(1.0 / 2.2));
+  float dn = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  c += (dn - 0.5) / 255.0;
+  // alpha = particle coverage of the scene buffer, passed on for FXAA
+  o = vec4(c, s.a);
+}`;
+
+const FXAA_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; in vec2 vPx; out vec4 o;
+uniform sampler2D uTex;
+void main() {
+  vec2 rcp = 1.0 / vPx;
+  vec4 sNW = texture(uTex, vUv + vec2(-1, -1) * rcp), sNE = texture(uTex, vUv + vec2(1, -1) * rcp);
+  vec4 sSW = texture(uTex, vUv + vec2(-1, 1) * rcp), sSE = texture(uTex, vUv + vec2(1, 1) * rcp), sM = texture(uTex, vUv);
+  vec3 rgbNW = sNW.rgb, rgbNE = sNE.rgb, rgbSW = sSW.rgb, rgbSE = sSE.rgb, rgbM = sM.rgb;
+  vec3 l = vec3(0.299, 0.587, 0.114);
+  float lNW = dot(rgbNW, l), lNE = dot(rgbNE, l), lSW = dot(rgbSW, l), lSE = dot(rgbSE, l), lM = dot(rgbM, l);
+  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
+  float dirReduce = max((lNW + lNE + lSW + lSE) * 0.25 * (1.0 / 8.0), 1.0 / 128.0);
+  float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+  dir = clamp(dir * rcpDirMin, vec2(-8.0), vec2(8.0)) * rcp;
+  vec4 sA0 = texture(uTex, vUv + dir * (1.0 / 3.0 - 0.5)), sA1 = texture(uTex, vUv + dir * (2.0 / 3.0 - 0.5));
+  vec4 sB0 = texture(uTex, vUv + dir * -0.5), sB1 = texture(uTex, vUv + dir * 0.5);
+  // alpha = particle coverage. Sprites are analytic Gaussians and need no anti-aliasing, while this
+  // edge blur would smear them: it averages a rim pixel with pixels on the far side of the dot and
+  // carves a dim cross into it. Wherever any tap touches a sprite, leave the pixel untouched.
+  float cover = max(max(max(sNW.a, sNE.a), max(sSW.a, sSE.a)), sM.a);
+  cover = max(cover, max(max(sA0.a, sA1.a), max(sB0.a, sB1.a)));
+  if (cover > 0.004) { o = vec4(rgbM, 1.0); return; }
+  vec3 rgbA = 0.5 * (sA0.rgb + sA1.rgb);
+  vec3 rgbB = rgbA * 0.5 + 0.25 * (sB0.rgb + sB1.rgb);
+  float lB = dot(rgbB, l);
+  o = vec4((lB < lMin || lB > lMax) ? rgbA : rgbB, 1.0);
+}`;
+
+// ---------------------------------------------------------------- gl helpers
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: true, powerPreference: "high-performance" });
+if (!gl) { document.getElementById("hint").textContent = "WebGL2 not supported"; return; }
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + "\n" + src);
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+// ---------------------------------------------------------------- math
+const M4 = {
+  ident: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+  mul(a, b) { const o = new Float32Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; },
+  perspective(fovy, asp, n, f) { const t = 1 / Math.tan(fovy / 2), o = new Float32Array(16); o[0] = t / asp; o[5] = t; o[10] = (f + n) / (n - f); o[11] = -1; o[14] = 2 * f * n / (n - f); return o; },
+  translate(x, y, z) { const o = M4.ident(); o[12] = x; o[13] = y; o[14] = z; return o; },
+  scale(x, y, z) { const o = M4.ident(); o[0] = x; o[5] = y; o[10] = z; return o; },
+  rotX(a) { const c = Math.cos(a), s = Math.sin(a), o = M4.ident(); o[5] = c; o[6] = s; o[9] = -s; o[10] = c; return o; },
+  rotY(a) { const c = Math.cos(a), s = Math.sin(a), o = M4.ident(); o[0] = c; o[2] = -s; o[8] = s; o[10] = c; return o; },
+  rotZ(a) { const c = Math.cos(a), s = Math.sin(a), o = M4.ident(); o[0] = c; o[1] = s; o[4] = -s; o[5] = c; return o; },
+  invert(m) {
+    const o = new Float32Array(16);
+    const a00=m[0],a01=m[1],a02=m[2],a03=m[3],a10=m[4],a11=m[5],a12=m[6],a13=m[7],a20=m[8],a21=m[9],a22=m[10],a23=m[11],a30=m[12],a31=m[13],a32=m[14],a33=m[15];
+    const b00=a00*a11-a01*a10, b01=a00*a12-a02*a10, b02=a00*a13-a03*a10, b03=a01*a12-a02*a11, b04=a01*a13-a03*a11, b05=a02*a13-a03*a12;
+    const b06=a20*a31-a21*a30, b07=a20*a32-a22*a30, b08=a20*a33-a23*a30, b09=a21*a32-a22*a31, b10=a21*a33-a23*a31, b11=a22*a33-a23*a32;
+    let det = b00*b11-b01*b10+b02*b09+b03*b08-b04*b07+b05*b06; if (!det) return o; det = 1 / det;
+    o[0]=(a11*b11-a12*b10+a13*b09)*det; o[1]=(a02*b10-a01*b11-a03*b09)*det; o[2]=(a31*b05-a32*b04+a33*b03)*det; o[3]=(a22*b04-a21*b05-a23*b03)*det;
+    o[4]=(a12*b08-a10*b11-a13*b07)*det; o[5]=(a00*b11-a02*b08+a03*b07)*det; o[6]=(a32*b02-a30*b05-a33*b01)*det; o[7]=(a20*b05-a22*b02+a23*b01)*det;
+    o[8]=(a10*b10-a11*b08+a13*b06)*det; o[9]=(a01*b08-a00*b10-a03*b06)*det; o[10]=(a30*b04-a31*b02+a33*b00)*det; o[11]=(a21*b02-a20*b04-a23*b00)*det;
+    o[12]=(a11*b07-a10*b09-a12*b06)*det; o[13]=(a00*b09-a01*b07+a02*b06)*det; o[14]=(a31*b01-a30*b03-a32*b00)*det; o[15]=(a20*b03-a21*b01+a22*b00)*det;
+    return o;
+  },
+  normalMat(m) {
+    const inv = M4.invert(m); const o = new Float32Array(9);
+    o[0]=inv[0]; o[1]=inv[4]; o[2]=inv[8]; o[3]=inv[1]; o[4]=inv[5]; o[5]=inv[9]; o[6]=inv[2]; o[7]=inv[6]; o[8]=inv[10];
+    return o;
+  },
+};
+const V3 = {
+  add: (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]], sub: (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]],
+  scale: (a, s) => [a[0]*s, a[1]*s, a[2]*s], dot: (a, b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+  cross: (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]],
+  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; },
+  len: (a) => Math.hypot(a[0], a[1], a[2]),
+};
+function lookAt(eye, target, up) {
+  const z = V3.norm(V3.sub(eye, target)); const x = V3.norm(V3.cross(up, z)); const y = V3.cross(z, x);
+  const o = new Float32Array(16);
+  o[0]=x[0]; o[1]=y[0]; o[2]=z[0]; o[4]=x[1]; o[5]=y[1]; o[6]=z[1]; o[8]=x[2]; o[9]=y[2]; o[10]=z[2];
+  o[12]=-V3.dot(x, eye); o[13]=-V3.dot(y, eye); o[14]=-V3.dot(z, eye); o[15]=1; return o;
+}
+// ---------------------------------------------------------------- geometry builder
+class Mesh {
+  constructor() { this.pos = []; this.nor = []; this.col = []; this.idx = []; }
+  quad(a, b, c, d, n, col) {
+    const i = this.pos.length / 3;
+    for (const p of [a, b, c, d]) { this.pos.push(p[0], p[1], p[2]); this.nor.push(n[0], n[1], n[2]); this.col.push(col[0], col[1], col[2]); }
+    this.idx.push(i, i+1, i+2, i, i+2, i+3);
+  }
+  tri(a, b, c, n, col) {
+    const i = this.pos.length / 3;
+    for (const p of [a, b, c]) { this.pos.push(p[0], p[1], p[2]); this.nor.push(n[0], n[1], n[2]); this.col.push(col[0], col[1], col[2]); }
+    this.idx.push(i, i+1, i+2);
+  }
+  // strip quad with its own normal per row: neighbouring quads share the row normals, so a ribbon
+  // built from these shades as one smooth surface instead of a row of flat facets
+  stripQuad(a, b, c, d, nab, ncd, col) {
+    const i = this.pos.length / 3;
+    for (const [p, n] of [[a, nab], [b, nab], [c, ncd], [d, ncd]]) { this.pos.push(p[0], p[1], p[2]); this.nor.push(n[0], n[1], n[2]); this.col.push(col[0], col[1], col[2]); }
+    this.idx.push(i, i+1, i+2, i, i+2, i+3);
+  }
+  // revolve a profile [[r,y],...] around Y. smooth=true averages profile normals (spheres, domes); false = hard edges (cases, gears)
+  lathe(profile, seg, col, cap, smooth) {
+    const n = profile.length, SN = [];
+    for (let i = 0; i < n - 1; i++) {
+      const dy = profile[i + 1][1] - profile[i][1], dr = profile[i + 1][0] - profile[i][0];
+      const l = Math.hypot(dy, dr) || 1; SN.push([dy / l, -dr / l]);
+    }
+    const ringN = (i) => {
+      if (smooth && i > 0 && i < n - 1) { let nx = SN[i - 1][0] + SN[i][0], ny = SN[i - 1][1] + SN[i][1]; const l = Math.hypot(nx, ny) || 1; return [nx / l, ny / l]; }
+      return SN[Math.min(i, n - 2)];
+    };
+    const addRing = (i, forceN) => {
+      const [r, y] = profile[i], [nx, ny] = forceN || ringN(i), start = this.pos.length / 3;
+      for (let j = 0; j <= seg; j++) {
+        const a = j / seg * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+        this.pos.push(c * r, y, s * r); this.nor.push(c * nx, ny, s * nx); this.col.push(col[0], col[1], col[2]);
+      }
+      return start;
+    };
+    const link = (s0, s1) => { for (let j = 0; j < seg; j++) { const a0 = s0 + j, a1 = a0 + 1, b0 = s1 + j, b1 = b0 + 1; this.idx.push(a0, b0, a1, a1, b0, b1); } };
+    if (smooth) { const starts = []; for (let i = 0; i < n; i++) starts.push(addRing(i)); for (let i = 0; i < n - 1; i++) link(starts[i], starts[i + 1]); }
+    else for (let i = 0; i < n - 1; i++) link(addRing(i, SN[i]), addRing(i + 1, SN[i]));
+    if (cap) {
+      // flat caps at both ends if radius > 0
+      const capAt = (ring, up) => {
+        const r = profile[ring][0]; if (r <= 1e-4) return;
+        const y = profile[ring][1]; const c = [0, y, 0];
+        const ci = this.pos.length / 3; this.pos.push(0, y, 0); this.nor.push(0, up, 0); this.col.push(col[0], col[1], col[2]);
+        for (let j = 0; j <= seg; j++) {
+          const a = j / seg * Math.PI * 2; this.pos.push(Math.cos(a) * r, y, Math.sin(a) * r); this.nor.push(0, up, 0); this.col.push(col[0], col[1], col[2]);
+        }
+        for (let j = 0; j < seg; j++) {
+          const a = ci + 1 + j, b = a + 1;
+          if (up > 0) this.idx.push(ci, a, b); else this.idx.push(ci, b, a);
+        }
+      };
+      capAt(0, -1); capAt(n - 1, 1);
+    }
+  }
+  cylinder(r, h, seg, col) { this.lathe([[0, -h/2], [r, -h/2], [r, h/2], [0, h/2]], seg, col, true); }
+  box(cx, cy, cz, sx, sy, sz, col, yaw = 0) {
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    const hx = sx/2, hy = sy/2, hz = sz/2;
+    const P = (x, y, z) => { const yy = cy + y; const xx = x * c + z * s, zz = -x * s + z * c; return [cx + xx, yy, cz + zz]; };
+    const N = (x, y, z) => [x * c + z * s, y, -x * s + z * c];
+    this.quad(P(-hx,-hy, hz), P(hx,-hy, hz), P(hx,hy, hz), P(-hx,hy, hz), N(0,0,1), col);
+    this.quad(P(hx,-hy,-hz), P(-hx,-hy,-hz), P(-hx,hy,-hz), P(hx,hy,-hz), N(0,0,-1), col);
+    this.quad(P(hx,-hy, hz), P(hx,-hy,-hz), P(hx,hy,-hz), P(hx,hy, hz), N(1,0,0), col);
+    this.quad(P(-hx,-hy,-hz), P(-hx,-hy, hz), P(-hx,hy, hz), P(-hx,hy,-hz), N(-1,0,0), col);
+    this.quad(P(-hx,hy, hz), P(hx,hy, hz), P(hx,hy,-hz), P(-hx,hy,-hz), N(0,1,0), col);
+    this.quad(P(-hx,-hy,-hz), P(hx,-hy,-hz), P(hx,-hy, hz), P(-hx,-hy, hz), N(0,-1,0), col);
+  }
+  // gear in XZ plane (thickness along Y), centered at origin
+  gear(rOuter, rInner, teeth, thick, col) {
+    const seg = teeth * 4;
+    const rTip = rOuter, rValley = rInner;
+    for (let i = 0; i < seg; i++) {
+      const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+      const r0 = (i % 4 < 2) ? rTip : rValley;
+      const r1 = ((i + 1) % 4 < 2) ? rTip : rValley;
+      // side wall
+      const p = (a, r, y) => [Math.cos(a) * r, y, Math.sin(a) * r];
+      const A0 = p(a0, r0, -thick/2), A1 = p(a1, r1, -thick/2), B0 = p(a0, r0, thick/2), B1 = p(a1, r1, thick/2);
+      const mid = (a0 + a1) / 2;
+      const n = [Math.cos(mid), 0, Math.sin(mid)];
+      this.quad(A0, A1, B1, B0, n, col);
+      // top & bottom ring quad from valley to tip (annulus)
+    }
+    const y = thick / 2;
+    for (let i = 0; i < seg; i++) {
+      const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+      const r0 = (i % 4 < 2) ? rTip : rValley;
+      const r1 = ((i + 1) % 4 < 2) ? rTip : rValley;
+      const hub = rValley * 0.35;
+      const p = (a, r, yy) => [Math.cos(a) * r, yy, Math.sin(a) * r];
+      this.quad(p(a0, hub, y), p(a1, hub, y), p(a1, r1, y), p(a0, r0, y), [0, 1, 0], col);
+      this.quad(p(a0, hub, -y), p(a0, r0, -y), p(a1, r1, -y), p(a1, hub, -y), [0, -1, 0], col);
+      // hub wall
+      this.quad(p(a0, hub, -y), p(a1, hub, -y), p(a1, hub, y), p(a0, hub, y), [-Math.cos((a0+a1)/2), 0, -Math.sin((a0+a1)/2)], col);
+    }
+  }
+  sphere(r, seg, col, sy = 1) {
+    const prof = [];
+    for (let i = 0; i <= seg; i++) { const a = (i / seg) * Math.PI; prof.push([Math.sin(a) * r, -Math.cos(a) * r * sy]); }
+    this.lathe(prof, seg * 2, col, false, true);
+  }
+  upload() {
+    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    const inter = new Float32Array(this.pos.length / 3 * 9);
+    for (let i = 0; i < this.pos.length / 3; i++) {
+      inter.set([this.pos[i*3], this.pos[i*3+1], this.pos[i*3+2], this.nor[i*3], this.nor[i*3+1], this.nor[i*3+2], this.col[i*3], this.col[i*3+1], this.col[i*3+2]], i * 9);
+    }
+    gl.bufferData(gl.ARRAY_BUFFER, inter, gl.STATIC_DRAW);
+    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(this.idx), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 36, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 36, 12);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 36, 24);
+    gl.bindVertexArray(null);
+    return { vao, count: this.idx.length };
+  }
+}
+// ---------------------------------------------------------------- scene objects
+const OBJ = {};   // name -> {vao, count, mat}
+function addPart(name, build, mat) {
+  const m = new Mesh(); build(m);
+  const r = m.upload();
+  OBJ[name] = { vao: r.vao, count: r.count, mat };
+}
+
+const MAT = {
+  brass: { rough: 0.38, metal: 1, emis: 0.06, alpha: 1, rim: 0.3 },
+  brassDark: { rough: 0.45, metal: 1, emis: 0.04, alpha: 1, rim: 0.3 },
+  brassGlow: { rough: 0.42, metal: 1, emis: 0.14, alpha: 1, rim: 0.3 },
+  steel: { rough: 0.35, metal: 1, emis: 0.02, alpha: 1, rim: 0.3 },
+  glass: { rough: 0.04, metal: 0, emis: 0.0, alpha: 0.10, rim: 0.6 },
+  enamel: { rough: 0.55, metal: 0, emis: 0.05, alpha: 1, rim: 0.2 },
+  wood: { rough: 0.85, metal: 0, emis: 0, alpha: 1, rim: 0.2 },
+  glow: { rough: 0.9, metal: 0, emis: 3.0, alpha: 1, rim: 0 },
+  leaf: { rough: 0.8, metal: 0, emis: 0.32, alpha: 1, rim: 0.5 },
+  velvet: { rough: 0.95, metal: 0, emis: 0.0, alpha: 1, rim: 0.28, fade: 1 },
+};
+
+const WATER_FRAG = `#version 300 es
+precision highp float;
+in vec3 vWorld; in vec3 vNor; in vec3 vCol;
+uniform vec3 uCam; uniform float uTime, uLightMul;
+uniform vec3 uPool;
+uniform vec4 uFall;   // fall ribbon: axis (x, z), radial start, radial length
+uniform vec3 uFallW;  // ... and its half width w0 + w1 * f, plus the crest height
+uniform vec2 uRiv;    // rivulet flow direction (x, z)
+out vec4 o;
+
+// gradient noise with quintic fade (C2): smooth in every direction, so no lattice cell can show as a facet
+vec2 ghash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.xx + q.yz) * q.zy) * 2.0 - 1.0;
+}
+float gnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(mix(dot(ghash(i), f), dot(ghash(i + vec2(1, 0)), f - vec2(1, 0)), u.x),
+             mix(dot(ghash(i + vec2(0, 1)), f - vec2(0, 1)), dot(ghash(i + vec2(1, 1)), f - vec2(1, 1)), u.x), u.y) * 1.4142;
+}
+float gfbm(vec2 p, int oct) {
+  float v = 0.0, a = 0.5;
+  for (int k = 0; k < 3; k++) {
+    if (k >= oct) break;
+    v += a * gnoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p + 7.31; a *= 0.5;
+  }
+  return v * 1.6 + 0.5;
+}
+
+void main() {
+  vec3 N = normalize(vNor); vec3 V = normalize(uCam - vWorld);
+  float fres = pow(1.0 - abs(dot(N, V)), 2.0);
+  float t = uTime, streak, am = vCol.r / 0.6, edge = 1.0, across = 0.0;
+  // vCol.r = alpha hint (0.6 = full); vCol.b < 0.5 marks the pool, vCol.g > 0.5 the fall ribbon
+  if (vCol.b < 0.5) {
+    // pool: rings spreading from where the fall lands, over drifting foam
+    float dist = distance(vWorld.xz, uPool.xz);
+    am *= 1.0 - smoothstep(0.2, 0.62, dist);
+    float ring = sin(dist * 46.0 - t * 6.5 + gfbm(vWorld.xz * 6.0 + t * 0.2, 2) * 4.0);
+    float fn = gfbm(vWorld.xz * 9.0 + vec2(0.0, -t * 1.5), 3);
+    streak = smoothstep(0.15, 0.9, 0.42 + 0.22 * ring + 0.5 * (fn - 0.5));
+  } else {
+    // ribbon-local frame: x runs across (-1..1 from edge to edge), y along the flow. Threads are
+    // stretched along y, fan out as the ribbon widens and scroll with the current.
+    vec2 uv;
+    if (vCol.g > 0.5) {
+      vec2 d = uFall.xy, s = vec2(-d.y, d.x);
+      float along = dot(vWorld.xz, d), f = clamp((along - uFall.z) / uFall.w, 0.0, 1.0);
+      across = dot(vWorld.xz, s) / (uFallW.x + uFallW.y * f);
+      uv = vec2(across * 7.0, (along - uFall.z) * 2.5 + max(uFallW.z - vWorld.y, 0.0) * 3.5 - t * 3.5);
+      am *= smoothstep(0.0, 0.04, f) * (1.0 - smoothstep(0.82, 1.0, f));   // leaves the spring, dissolves into the pool
+    } else {
+      uv = vec2(dot(vWorld.xz, vec2(-uRiv.y, uRiv.x)) * 24.0, dot(vWorld.xz, uRiv) * 5.0 - t * 3.0);
+    }
+    float n1 = gfbm(uv * vec2(1.0, 0.7), 3);
+    float n2 = gfbm(uv * vec2(2.0, 1.3) + 11.0, 2);
+    streak = smoothstep(0.2, 0.9, n1 * 0.6 + n2 * 0.45);
+    // feathered edges: the fade band wanders with the flow, alpha is exactly 0 at the geometric edge
+    if (vCol.g > 0.5) {
+      float e = abs(across) + gnoise(vec2(uv.y * 0.8, uv.x * 0.5)) * 0.45;
+      edge = (1.0 - smoothstep(0.6, 1.05, e)) * (1.0 - smoothstep(0.85, 1.0, abs(across)));
+    }
+  }
+  vec3 deep = vec3(0.10, 0.32, 0.48);
+  vec3 foam = vec3(0.85, 0.95, 1.0);
+  vec3 col = mix(deep, foam, streak * 0.85 + fres * 0.5);
+  col += vec3(0.25, 0.45, 0.6) * 0.5 * uLightMul;
+  float a = clamp((0.36 + streak * 0.45 + fres * 0.25) * am * edge, 0.0, 0.9);
+  col = max(col, vec3(0.0));
+  if (any(isnan(col))) { o = vec4(0.0); return; }
+  o = vec4(col * 0.95, a);
+}`;
+
+const PART_VERT = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aCol;
+layout(location=2) in vec2 aProp; // size, seed
+uniform mat4 uProj, uView;
+uniform float uTime, uPixelScale, uIntensity, uMaxPt, uMinPt;
+out vec3 vCol; out float vFade; out float vPeak;
+void main() {
+  vec3 p = aPos;
+  float s = aProp.y;
+  float t = uTime;
+  // gentle drift
+  p.x += sin(t * 0.37 + s * 31.0) * 0.12 * (0.3 + s);
+  p.z += cos(t * 0.29 + s * 17.0) * 0.12 * (0.3 + s);
+  p.y += sin(t * 0.21 + s * 53.0) * 0.08;
+  // life cycle fade
+  float life = fract(t * (0.08 + s * 0.06) + s);
+  vFade = smoothstep(0.0, 0.2, life) * (1.0 - smoothstep(0.65, 1.0, life));
+  vec4 v = uView * vec4(p, 1.0);
+  gl_Position = uProj * v;
+  // soft-limited size: can never reach the driver clamp (which would clip sprites into hard squares)
+  float ps = aProp.x * uPixelScale / max(-v.z, 0.1);
+  float size = uMaxPt * ps / (uMaxPt + ps);
+  // floor: below a handful of pixels the radial falloff cannot be resolved and the sprite collapses
+  // into a crisp square pixel. Such a sprite keeps the minimum size and gives up alpha instead, so it
+  // reads as a faint soft spark (alpha ∝ r^1.5: a compromise between equal light and staying visible).
+  float r = clamp(size / uMinPt, 0.0, 1.0);
+  gl_PointSize = max(uMinPt, size);
+  vFade *= r * sqrt(r);
+  vCol = aCol * uIntensity;
+  // dim particles (mist, smoke) are also more transparent: a dark puff must not paint an opaque disc
+  vPeak = min(length(vCol) * 0.8, 1.0);
+}`;
+
+const PART_FRAG = `#version 300 es
+precision highp float;
+in vec3 vCol; in float vFade; in float vPeak;
+out vec4 o;
+void main() {
+  vec2 q = gl_PointCoord - 0.5;
+  float r2 = dot(q, q);
+  if (r2 > 0.25) discard;
+  // smooth radial falloff exp(-dot(q,q)*k): a Gaussian windowed to exactly zero (C1) at radius 0.47,
+  // i.e. before the sprite's edge at 0.5, so no pixel of the square point raster ever shows an edge
+  float a = exp(-r2 * 16.0) * (1.0 - smoothstep(0.25, 0.47, sqrt(r2)));
+  a *= vFade * vPeak;
+  if (!(a > 0.0)) discard;
+  o = vec4(vCol * a, min(a, 1.0));
+}`;
+
+// ---------------------------------------------------------------- programs
+let progMain, progWater, progPart, progSky, progBright, progBlur, progFinal, progFxaa;
+try {
+  progMain = program(VERT, FRAG);
+  progWater = program(VERT, WATER_FRAG);
+  progPart = program(PART_VERT, PART_FRAG);
+  progSky = program(FS_VERT, SKY_FRAG);
+  progBright = program(FS_VERT, BRIGHT_FRAG);
+  progBlur = program(FS_VERT, BLUR_FRAG);
+  progFinal = program(FS_VERT, FINAL_FRAG);
+  progFxaa = program(FS_VERT, FXAA_FRAG);
+} catch (e) { console.error(e); throw e; }
+
+// empty VAO for fullscreen passes; 1x1 dummy texture for passes that sample nothing
+const fsVao = gl.createVertexArray();
+const dummyTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, dummyTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+const MAX_PT = Math.min(256, gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1] || 64);
+// smallest sprite, in display pixels (scaled to the internal buffer in the frame loop). Its Gaussian
+// (k = 16) then has sigma >= 1.05 px on screen: the core is no longer a flat 2x2 block that reads as a
+// square, and the falloff is resolved instead of aliasing.
+const MIN_PT = 12;
+
+// ---------------------------------------------------------------- framebuffers
+const extFloat = gl.getExtension("EXT_color_buffer_float");
+function makeTarget(w, h, hdr, filter) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, hdr && extFloat ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, hdr && extFloat ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter ? gl.LINEAR : gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter ? gl.LINEAR : gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  let depth = null;
+  if (hdr) {
+    depth = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { fb, tex, depth, w, h };
+}
+let rtScene, rtA, rtB, rtLdr;
+let W = 1, H = 1;
+// internal resolution: supersample low-dpi displays, cap total pixels, adapt down if frames get slow
+const MAX_PIXELS = 2.6e6, PIN_HQ = /(^|[#&])hq(=1)?(&|$)/.test(location.hash);
+function targetScale() {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.max(0.6, Math.min(Math.max(dpr, 1.5), Math.sqrt(MAX_PIXELS / (innerWidth * innerHeight))));
+}
+let wantScale = targetScale();
+function resize() {
+  const w = Math.max(2, Math.floor(innerWidth * wantScale)), h = Math.max(2, Math.floor(innerHeight * wantScale));
+  if (w === W && h === H && rtScene) return;
+  W = w; H = h;
+  canvas.width = W; canvas.height = H;
+  for (const t of [rtScene, rtA, rtB, rtLdr]) if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); if (t.depth) gl.deleteRenderbuffer(t.depth); }
+  rtScene = makeTarget(W, H, true, true);
+  const hw = Math.max(2, W >> 1), hh = Math.max(2, H >> 1);
+  rtA = makeTarget(hw, hh, true, true);
+  rtB = makeTarget(hw, hh, true, true);
+  rtLdr = makeTarget(W, H, false, true);
+}
+window.addEventListener("resize", () => { wantScale = targetScale(); resize(); });
+resize();
+
+// ---------------------------------------------------------------- scene build
+Mesh.prototype.append = function (other, mat) {
+  const base = this.pos.length / 3, nm = M4.normalMat(mat);
+  for (let i = 0; i < other.pos.length; i += 3) {
+    const x = other.pos[i], y = other.pos[i+1], z = other.pos[i+2];
+    this.pos.push(mat[0]*x + mat[4]*y + mat[8]*z + mat[12], mat[1]*x + mat[5]*y + mat[9]*z + mat[13], mat[2]*x + mat[6]*y + mat[10]*z + mat[14]);
+    const nx = other.nor[i], ny = other.nor[i+1], nz = other.nor[i+2];
+    const n = V3.norm([nm[0]*nx + nm[3]*ny + nm[6]*nz, nm[1]*nx + nm[4]*ny + nm[7]*nz, nm[2]*nx + nm[5]*ny + nm[8]*nz]);
+    this.nor.push(n[0], n[1], n[2]);
+    this.col.push(other.col[i], other.col[i+1], other.col[i+2]);
+  }
+  for (const ix of other.idx) this.idx.push(base + ix);
+};
+Mesh.prototype.torus = function (R, r, seg, col) {
+  const p = []; for (let i = 0; i <= 20; i++) { const t = -Math.PI / 2 + (i / 20) * Math.PI * 2; p.push([R + r * Math.cos(t), r * Math.sin(t)]); }
+  this.lathe(p, seg, col, false, true);
+};
+Mesh.prototype.cone = function (r, h, y, col) { this.lathe([[r, y], [r * 0.02, y + h]], 16, col, false, false); };
+Mesh.prototype.dome = function (r, h, col) {
+  const p = []; for (let i = 0; i <= 16; i++) { const a = (i / 16) * Math.PI / 2; p.push([r * Math.cos(a), h * Math.sin(a)]); }
+  this.lathe(p, 40, col, false, true);
+};
+
+const BRASS = [0.90, 0.60, 0.20], BRASS_D = [0.52, 0.33, 0.12], BRASS_L = [0.98, 0.74, 0.36], STEEL = [0.5, 0.52, 0.58];
+const VELVET = [0.26, 0.04, 0.07], MOSS = [0.10, 0.30, 0.15], WOOD = [0.46, 0.28, 0.15], ROOF = [0.42, 0.16, 0.11];
+
+// velvet cloth
+addPart("velvet", (m) => {
+  const N = 60, S = 60;
+  const yAt = (x, z) => 0.06 * Math.sin(x * 0.5 + 0.4) * Math.cos(z * 0.42) + 0.025 * Math.sin(x * 1.2 + z * 0.8);
+  for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+    const x = (i / N - 0.5) * S, z = (j / N - 0.5) * S, e = 0.05, y = yAt(x, z);
+    const dx = (yAt(x + e, z) - yAt(x - e, z)) / (2 * e), dz = (yAt(x, z + e) - yAt(x, z - e)) / (2 * e);
+    const n = V3.norm([-dx, 1, -dz]);
+    m.pos.push(x, y, z); m.nor.push(n[0], n[1], n[2]); m.col.push(VELVET[0], VELVET[1], VELVET[2]);
+  }
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const a = i * (N + 1) + j, b = a + 1, c = a + N + 1, d = c + 1;
+    m.idx.push(a, b, c, b, d, c);
+  }
+}, MAT.velvet);
+
+// watch case (bowl), bezel ring, main plate
+addPart("case", (m) => m.lathe([[0,0],[1.85,0],[2.10,0.06],[2.18,0.22],[2.18,0.46],[2.08,0.55],[1.92,0.55],[1.88,0.50],[1.88,0.02],[0,0.02]], 96, BRASS, false), MAT.brass);
+addPart("bezel", (m) => m.torus(2.03, 0.09, 96, BRASS_L), MAT.brass);
+addPart("plate", (m) => m.lathe([[0,0.04],[1.86,0.04],[1.86,0.30],[0,0.30]], 64, BRASS_D, false), MAT.brassDark);
+// crown, bow, hinge (built at origin, placed at draw time)
+addPart("crown", (m) => { m.gear(0.25, 0.20, 18, 0.34, BRASS_L); }, MAT.brass);
+addPart("bow", (m) => m.torus(0.36, 0.055, 64, BRASS_L), MAT.brass);
+addPart("hinge", (m) => { const s = new Mesh(); s.cylinder(0.07, 0.7, 12, BRASS); m.append(s, M4.rotZ(Math.PI / 2)); }, MAT.brass);
+// open lid, lying beyond the hinge: inside face up
+addPart("lid", (m) => m.lathe([[0,0],[1.95,0],[2.12,0.04],[2.16,0.14],[2.10,0.24],[1.98,0.28],[1.86,0.28],[1.70,0.24],[1.2,0.12],[0,0.06]], 96, BRASS, false), MAT.brass);
+addPart("lidRing", (m) => m.torus(1.45, 0.05, 80, BRASS), MAT.brass);
+addPart("lidEnamel", (m) => m.lathe([[1.36, 0.0],[0, 0.0]], 64, [0.10, 0.16, 0.30], false), MAT.enamel);
+// chain
+addPart("chain", (m) => {
+  const link = new Mesh(); link.torus(0.115, 0.034, 20, BRASS_L);
+  for (let k = 0; k < 19; k++) {
+    const t = k / 18;
+    const px = -1.8 * Math.sin(t * 1.1), pz = -3.15 - 2.3 * t;
+    const tx = -1.8 * 1.1 * Math.cos(t * 1.1), tz = -2.3;
+    const yaw = Math.atan2(tx, tz);
+    let mat = M4.translate(px, 0.075, pz);
+    mat = M4.mul(mat, M4.rotY(yaw));
+    if (k % 2) { mat = M4.mul(mat, M4.rotX(Math.PI / 2)); mat = M4.mul(mat, M4.translate(0, 0.07, 0)); }
+    else mat = M4.mul(mat, M4.translate(0, -0.04, 0));
+    mat = M4.mul(mat, M4.scale(1, 1, 1.45));
+    m.append(link, mat);
+  }
+}, MAT.brass);
+
+// gears: one part each (same geometry rotated per frame)
+const GEARS = [
+  { name: "gBig", r: 1.70, teeth: 60, thick: 0.06, pos: [0, 0.33, 0],      w: -0.045, col: BRASS_D },
+  { name: "g1",   r: 0.80, teeth: 36, thick: 0.08, pos: [0.10, 0.405, 0.15], w: 0.11, col: BRASS },
+  { name: "g2",   r: 0.45, teeth: 20, thick: 0.08, pos: [1.23, 0.405, 0.52], w: -0.198, col: BRASS_L },
+  { name: "g3",   r: 0.36, teeth: 16, thick: 0.07, pos: [-0.23, 0.405, 1.20], w: 0.247, col: BRASS },
+  { name: "g4",   r: 0.30, teeth: 15, thick: 0.07, pos: [-0.82, 0.405, 1.32], w: 0, escape: true, col: STEEL },
+  { name: "g5",   r: 0.28, teeth: 12, thick: 0.07, pos: [0.94, 0.405, 1.12], w: 0.33, col: BRASS_L },
+  { name: "g6",   r: 0.32, teeth: 14, thick: 0.07, pos: [0.63, 0.405, -0.77], w: -0.282, col: BRASS },
+];
+for (const g of GEARS) addPart(g.name, (m) => m.gear(g.r, g.r * 0.88, g.teeth, g.thick, g.col), g.name === "g4" ? MAT.steel : g.name === "gBig" ? MAT.brassGlow : MAT.brass);
+addPart("pin", (m) => m.cylinder(0.055, 0.07, 12, STEEL), MAT.steel);
+addPart("arbor", (m) => { m.cylinder(0.05, 0.14, 12, BRASS_L); m.sphere(0.07, 8, BRASS_L, 0.6); }, MAT.brass);
+// hands
+const LACQUER = [0.85, 0.26, 0.14];
+addPart("handH", (m) => { m.box(0, 0, -0.40, 0.11, 0.02, 0.80, LACQUER); m.box(0, 0, 0.10, 0.15, 0.02, 0.22, LACQUER); }, MAT.enamel);
+addPart("handM", (m) => { m.box(0, 0, -0.62, 0.07, 0.02, 1.24, LACQUER); m.box(0, 0, 0.14, 0.10, 0.02, 0.28, LACQUER); }, MAT.enamel);
+addPart("handS", (m) => { const S2 = [0.85, 0.88, 0.95]; m.box(0, 0, -0.66, 0.022, 0.014, 1.32, S2); m.box(0, 0, 0.16, 0.03, 0.014, 0.32, S2); }, MAT.steel);
+// hour markers + minute ticks
+addPart("markers", (m) => {
+  for (let k = 0; k < 60; k++) {
+    const a = k * Math.PI / 30, major = k % 5 === 0;
+    const R = 1.66;
+    m.box(Math.sin(a) * R, 0.545, Math.cos(a) * R, major ? 0.09 : 0.03, 0.012, major ? 0.24 : 0.12, major ? BRASS_L : BRASS_D, a);
+  }
+}, MAT.brass);
+// glass dial
+addPart("glass", (m) => m.lathe([[1.9, 0.55], [0, 0.55]], 80, [0.75, 0.85, 0.95], false), MAT.glass);
+
+// ---------------------------------------------------------------- miniature world
+MAT.hill = { rough: 0.9, metal: 0, emis: 0.03, alpha: 1, rim: 0.4 };
+MAT.window = { rough: 0.6, metal: 0, emis: 2.2, alpha: 1, rim: 0 };
+MAT.spring = { rough: 0.6, metal: 0, emis: 1.0, alpha: 1, rim: 0 };
+MAT.water = { rough: 0.1, metal: 0, emis: 0, alpha: 0.6, rim: 1, water: true };
+
+const HILL = { x: -0.80, z: -0.70, r: 0.70, h: 0.40 };
+const hillY = (x, z) => { const d = Math.hypot(x - HILL.x, z - HILL.z); return 0.55 + HILL.h * Math.sqrt(Math.max(0, 1 - (d / HILL.r) ** 2)); };
+addPart("hill", (m) => m.dome(HILL.r, HILL.h, MOSS), MAT.hill);
+
+// pine tree: trunk + three cones, placed per instance
+addPart("tree", (m) => {
+  m.cylinder(0.03, 0.10, 8, WOOD);
+  m.cone(0.17, 0.24, 0.07, [0.04, 0.30, 0.18]);
+  m.cone(0.125, 0.22, 0.20, [0.06, 0.36, 0.21]);
+  m.cone(0.08, 0.20, 0.33, [0.08, 0.42, 0.25]);
+  m.sphere(0.03, 6, [1.0, 0.85, 0.45], 1); // glowing tip
+}, MAT.leaf);
+const TREES = [
+  [-1.05, -0.95, 1.0], [-0.52, -0.80, 0.85], [-0.95, -0.38, 0.9], [-0.62, -0.45, 0.75], [-1.20, -0.62, 0.8],
+  [-1.38, 0.10, 1.1], [-0.45, 1.30, 0.9], [-1.05, 0.72, 1.0], [0.25, 1.55, 0.8], [1.25, -0.65, 0.95], [0.95, -1.25, 0.8],
+].map(([x, z, s]) => ({ x, z, y: hillY(x, z), s }));
+
+// cabin
+addPart("cabin", (m) => {
+  m.box(0, 0.17, 0, 0.50, 0.34, 0.42, WOOD);
+  const rx = 0.30, ez = 0.26, ry = 0.56, ey = 0.32;
+  const ns = V3.norm([0, ez, ry - ey]);
+  m.quad([-rx, ry, 0], [rx, ry, 0], [rx, ey, ez], [-rx, ey, ez], ns, ROOF);
+  m.quad([rx, ry, 0], [-rx, ry, 0], [-rx, ey, -ez], [rx, ey, -ez], [ns[0], ns[1], -ns[2]], ROOF);
+  m.tri([0.25, 0.34, 0.21], [0.25, 0.34, -0.21], [0.25, 0.56, 0], [1, 0, 0], WOOD);
+  m.tri([-0.25, 0.34, -0.21], [-0.25, 0.34, 0.21], [-0.25, 0.56, 0], [-1, 0, 0], WOOD);
+  m.box(0.14, 0.62, -0.06, 0.09, 0.24, 0.09, [0.55, 0.55, 0.58]);
+  m.box(0, 0.10, 0.215, 0.11, 0.20, 0.02, [0.22, 0.13, 0.07]);
+}, MAT.wood);
+addPart("windows", (m) => {
+  m.box(-0.14, 0.20, 0.215, 0.10, 0.10, 0.02, [1.0, 0.72, 0.32]);
+  m.box(0.14, 0.20, 0.215, 0.10, 0.10, 0.02, [1.0, 0.72, 0.32]);
+  m.box(0.255, 0.20, -0.02, 0.02, 0.10, 0.10, [1.0, 0.72, 0.32]);
+}, MAT.window);
+const CABIN = { x: 0.75, z: 1.05, yaw: -0.45 };
+
+// waterfall over the bezel + rivulet on the dial
+const PHI = 0.25, DIR = [Math.cos(PHI), 0, Math.sin(PHI)], SIDE = [-Math.sin(PHI), 0, Math.cos(PHI)];
+// one source of truth for the fall ribbon: read by the mesh here and by the water shader (uniforms below)
+const FALL = { r0: 1.55, len: 1.9, w0: 0.09, w1: 0.26, yDial: 0.558, yCrest: 0.658, drop: 0.638 };
+const POOL = [DIR[0] * (FALL.r0 + FALL.len), 0, DIR[2] * (FALL.r0 + FALL.len)];
+const RIV = { A: [1.00, 0.557, 0.78], B: [1.38, 0.557, 0.70], C: [1.52, 0.557, 0.40] };
+const RIVDIR = V3.norm([RIV.C[0] - RIV.A[0], 0, RIV.C[2] - RIV.A[2]]);
+addPart("water", (m) => {
+  // vCol is only a marker for the water shader: r = alpha hint (0.6 = full), g > 0.5 = fall ribbon, b < 0.5 = pool
+  const FALL_COL = [0.6, 1.0, 1.0], RIV_COL = [0.6, 0.0, 1.0], N = 48;
+  // centreline: flat on the dial, eases up over the bezel (zero slope at both ends), then a parabolic
+  // fall. Returns radius, height and dy/ds, so every row gets its exact surface normal.
+  const prof = (s) => {
+    const r = FALL.r0 + FALL.len * s;
+    if (s < 0.2) return [r, FALL.yDial, 0];
+    if (s < 0.42) { const v = (s - 0.2) / 0.22; return [r, FALL.yDial + 0.1 * v * v * (3 - 2 * v), 0.1 * 6 * v * (1 - v) / 0.22]; }
+    const u = (s - 0.42) / 0.58; return [r, FALL.yCrest - FALL.drop * u * u, -2 * FALL.drop * u / 0.58];
+  };
+  const rowN = (s) => { const dy = prof(s)[2], dr = FALL.len, l = Math.hypot(dy, dr); return [-DIR[0] * dy / l, dr / l, -DIR[2] * dy / l]; };
+  let prev = null;
+  for (let i = 0; i <= N; i++) {
+    const s = i / N, [r, y] = prof(s), wdt = FALL.w0 + FALL.w1 * s;
+    const c = [DIR[0] * r, y, DIR[2] * r];
+    const row = [[c[0] - SIDE[0] * wdt, c[1], c[2] - SIDE[2] * wdt], [c[0] + SIDE[0] * wdt, c[1], c[2] + SIDE[2] * wdt]];
+    // one normal per row, shared by the quads on both sides: the ribbon shades as a single smooth sheet
+    if (prev) m.stripQuad(prev[0], prev[1], row[1], row[0], rowN(s - 1 / N), rowN(s), FALL_COL);
+    prev = row;
+  }
+  // rivulet: quadratic bezier strip on the dial
+  const { A, B, C } = RIV, RN = 24;
+  let pp = null;
+  for (let i = 0; i <= RN; i++) {
+    const t = i / RN, it = 1 - t;
+    const x = it * it * A[0] + 2 * it * t * B[0] + t * t * C[0], z = it * it * A[2] + 2 * it * t * B[2] + t * t * C[2];
+    const tx = 2 * it * (B[0] - A[0]) + 2 * t * (C[0] - B[0]), tz = 2 * it * (B[2] - A[2]) + 2 * t * (C[2] - B[2]), tl = Math.hypot(tx, tz);
+    const w = 0.04 + 0.04 * t;
+    const row = [[x - (-tz / tl) * w, A[1], z - (tx / tl) * w], [x + (-tz / tl) * w, A[1], z + (tx / tl) * w]];
+    if (pp) m.quad(pp[0], pp[1], row[1], row[0], [0, 1, 0], RIV_COL);
+    pp = row;
+  }
+  // pool on the velvet where the fall lands
+  const pool = new Mesh(); pool.lathe([[0.62, 0.035], [0, 0.035]], 48, [0.22, 0.85, 0.4], false);
+  m.append(pool, M4.translate(POOL[0], 0, POOL[2]));
+}, MAT.water);
+addPart("spring", (m) => m.lathe([[0.13, 0.0], [0, 0.0]], 20, [0.55, 0.9, 1.0], false), MAT.spring);
+
+// tiny rocks & mushrooms for detail
+addPart("rock", (m) => m.sphere(0.07, 6, [0.45, 0.47, 0.5], 0.6), MAT.hill);
+addPart("shroom", (m) => { m.cylinder(0.012, 0.05, 6, [0.9, 0.85, 0.7]); m.sphere(0.045, 8, [0.4, 0.95, 0.7], 0.6); }, MAT.spring);
+const ROCKS = [[-1.3, -0.35, 0.56, 1.2], [-0.3, -0.55, 0.56, 0.9], [0.2, 0.5, 0.56, 0.8], [-1.1, 1.0, 0.56, 1.1], [1.45, -1.0, 0.56, 0.7], [-0.2, 0.95, 0.56, 1.0]];
+const SHROOMS = [[-1.18, 0.25, 0.56, 1.0], [-1.02, 0.3, 0.56, 0.7], [-0.3, 1.05, 0.56, 0.8], [-0.5, -1.1, 0.56, 1.1], [-0.72, -0.95, hillY(-0.72, -0.95), 0.9]];
+
+// ---------------------------------------------------------------- static transforms
+const IDENT = M4.ident();
+const STATICS = [
+  ["case", IDENT], ["plate", IDENT], ["markers", IDENT],
+  ["crown", M4.mul(M4.translate(0, 0.30, -2.36), M4.rotX(Math.PI / 2))],
+  ["bow", M4.mul(M4.translate(0, 0.37, -2.80), M4.rotX(Math.PI / 2))],
+  ["hinge", M4.translate(0, 0.27, 2.24)],
+  ["lid", M4.translate(0, 0, 4.40)], ["lidRing", M4.translate(0, 0.20, 4.40)], ["lidEnamel", M4.translate(0, 0.165, 4.40)],
+  ["chain", IDENT], ["hill", M4.translate(HILL.x, 0.55, HILL.z)],
+  ["cabin", M4.mul(M4.translate(CABIN.x, 0.55, CABIN.z), M4.rotY(CABIN.yaw))],
+  ["windows", M4.mul(M4.translate(CABIN.x, 0.55, CABIN.z), M4.rotY(CABIN.yaw))],
+  ["spring", M4.mul(M4.translate(DIR[0] * 1.56, 0.66, DIR[2] * 1.56), M4.rotX(Math.PI / 2))],
+];
+for (const [x, y, z, s] of ROCKS) STATICS.push(["rock", M4.mul(M4.translate(x, y, z), M4.scale(s, s * 0.7, s))]);
+for (const [x, y, z, s] of SHROOMS) STATICS.push(["shroom", M4.mul(M4.translate(x, y, z), M4.scale(s, s, s))]);
+
+// ---------------------------------------------------------------- particles (soft radial sprites)
+const P = { pos: [], col: [], prop: [] };
+let rng = 12345; const rand = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 4294967296; };
+function pushP(x, y, z, c, size, seed) { P.pos.push(x, y, z); P.col.push(c[0], c[1], c[2]); P.prop.push(size, seed); }
+for (let i = 0; i < 40; i++) { // fireflies around the world
+  const t = TREES[i % TREES.length];
+  pushP(t.x + (rand() - 0.5) * 0.5, t.y + 0.15 + rand() * 0.45, t.z + (rand() - 0.5) * 0.5, [1.0, 0.82, 0.35], 0.07 + rand() * 0.05, rand());
+}
+for (let i = 0; i < 46; i++) { // mist at the waterfall base
+  const a = rand() * Math.PI * 2, r = rand() * 0.85;
+  pushP(POOL[0] + Math.cos(a) * r, 0.06 + rand() * 0.4, POOL[2] + Math.sin(a) * r * 0.8, [0.13, 0.18, 0.28], 0.3 + rand() * 0.32, rand());
+}
+for (let i = 0; i < 30; i++) { // spray along the fall
+  const s = 0.45 + rand() * 0.55, u = (s - 0.42) / 0.58, r = FALL.r0 + FALL.len * s, y = FALL.yCrest - FALL.drop * u * u;
+  pushP(DIR[0] * r + (rand() - 0.5) * 0.25, y + (rand() - 0.5) * 0.12, DIR[2] * r + (rand() - 0.5) * 0.25, [0.3, 0.42, 0.62], 0.04 + rand() * 0.05, rand());
+}
+for (let i = 0; i < 90; i++) { // golden dust motes
+  const a = rand() * Math.PI * 2, r = 0.6 + rand() * 3.6;
+  pushP(Math.cos(a) * r, 0.2 + rand() * 2.6, Math.sin(a) * r, [1.0, 0.78, 0.45], 0.03 + rand() * 0.035, rand());
+}
+for (let i = 0; i < 14; i++) { // chimney smoke
+  pushP(CABIN.x + 0.14 + (rand() - 0.5) * 0.12, 1.3 + rand() * 0.7, CABIN.z - 0.06 + (rand() - 0.5) * 0.12, [0.09, 0.09, 0.12], 0.06 + rand() * 0.1, rand());
+}
+const pCount = P.pos.length / 3;
+const pInter = new Float32Array(pCount * 8);
+for (let i = 0; i < pCount; i++) { pInter.set([P.pos[i*3], P.pos[i*3+1], P.pos[i*3+2], P.col[i*3], P.col[i*3+1], P.col[i*3+2], P.prop[i*2], P.prop[i*2+1]], i * 8); }
+const partVao = gl.createVertexArray(); gl.bindVertexArray(partVao);
+const pbuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pbuf); gl.bufferData(gl.ARRAY_BUFFER, pInter, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 32, 12);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 32, 24);
+gl.bindVertexArray(null);
+
+// ---------------------------------------------------------------- atmospheres
+const MODES = [
+  { name: "Starry midnight", top: [0.004, 0.006, 0.018], mid: [0.012, 0.018, 0.05], hor: [0.055, 0.035, 0.075], ground: [0.02, 0.008, 0.014],
+    sunDir: V3.norm([-0.45, 0.55, -0.6]), sun: [0.62, 0.72, 0.95], sunK: 0.45, exposure: 1.0, bloom: 0.7, tint: [1, 1, 1], stars: 1, aurora: 0, pl: 1.0, fogK: 0.85 },
+  { name: "Golden hour", top: [0.08, 0.15, 0.32], mid: [0.35, 0.17, 0.09], hor: [0.6, 0.3, 0.12], ground: [0.12, 0.05, 0.03],
+    sunDir: V3.norm([0.7, 0.28, 0.5]), sun: [1.0, 0.72, 0.42], sunK: 1.7, exposure: 0.85, bloom: 0.55, tint: [1.03, 0.99, 0.94], stars: 0, aurora: 0, pl: 0.45, fogK: 0.42 },
+  { name: "Aurora borealis", top: [0.004, 0.008, 0.02], mid: [0.01, 0.03, 0.045], hor: [0.03, 0.07, 0.08], ground: [0.015, 0.03, 0.03],
+    sunDir: V3.norm([0.3, 0.5, -0.7]), sun: [0.35, 0.55, 0.8], sunK: 0.4, exposure: 1.05, bloom: 0.6, tint: [0.96, 1.0, 1.03], stars: 0.7, aurora: 1, pl: 0.85, fogK: 0.8 },
+];
+// point lights: warm key, cool fill, clockwork glow, cabin windows, pine hill
+const LIGHTS = [
+  { pos: [2.4, 3.4, 2.8], col: [1.2, 0.82, 0.45], k: 1.3 },
+  { pos: [-3.4, 2.4, -2.6], col: [0.5, 0.66, 1.0], k: 0.8 },
+  { pos: [0.0, 1.1, 0.1], col: [1.0, 0.70, 0.32], k: 0.25 },
+  { pos: [CABIN.x, 1.45, CABIN.z], col: [1.0, 0.55, 0.2], k: 1.1 },
+  { pos: [HILL.x, 1.25, HILL.z], col: [0.3, 0.95, 0.55], k: 0.35 },
+];
+const LPOS = new Float32Array(15), LCOL = new Float32Array(15);
+LIGHTS.forEach((l, i) => { LPOS.set(l.pos, i * 3); });
+const pal = { top: [0,0,0], mid: [0,0,0], hor: [0,0,0], ground: [0,0,0], sunDir: [0,1,0], sun: [0,0,0], sunK: 0, exposure: 1, bloom: 1, tint: [1,1,1], stars: 0, aurora: 0, pl: 1, fogK: 0.85, name: "" };
+let modeIdx = 0, modeFrom = null, modeT = 1;
+function snapshot() { const s = {}; for (const k in pal) s[k] = Array.isArray(pal[k]) ? pal[k].slice() : pal[k]; return s; }
+function applyMode(i) { modeFrom = snapshot(); modeIdx = i; modeT = 0; }
+function lerpPal(dt) {
+  modeT = Math.min(1, modeT + dt / 1.6);
+  const k = modeT * modeT * (3 - 2 * modeT), a = modeFrom, b = MODES[modeIdx];
+  if (!a) return;
+  for (const key of ["top", "mid", "hor", "ground", "sunDir", "sun", "tint"]) for (let j = 0; j < 3; j++) pal[key][j] = a[key][j] + (b[key][j] - a[key][j]) * k;
+  for (const key of ["sunK", "exposure", "bloom", "stars", "aurora", "pl", "fogK"]) pal[key] = a[key] + (b[key] - a[key]) * k;
+  const l = Math.hypot(...pal.sunDir) || 1; pal.sunDir = V3.scale(pal.sunDir, 1 / l);
+  pal.name = b.name;
+}
+applyMode(0); // fades in from black over the first 1.6 s
+
+// ---------------------------------------------------------------- camera + interaction
+const ORBIT_PERIOD = 35, FOV = 40 * Math.PI / 180;
+const smooth = (t) => t * t * (3 - 2 * t);
+function autoPose(t) {
+  const ph = t / ORBIT_PERIOD * Math.PI * 2;
+  return { yaw: 1.15 + ph, pitch: 0.54 + 0.08 * Math.sin(ph + 1.0), dist: 8.4 - 1.3 * (0.5 - 0.5 * Math.cos(ph)) };
+}
+const cam = { yaw: 0, pitch: 0, dist: 0, target: [0.3, 0.2, 1.0] };
+{ const p = autoPose(0); cam.yaw = p.yaw; cam.pitch = p.pitch; cam.dist = p.dist; }
+let autoTime = 0, interacting = false, idleTimer = 10, resumeT = 0, resumeFrom = null, blending = false;
+let simTime = 0, paused = false, lightLevel = 1.0;
+function lerpAngle(a, b, k) { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return a + d * k; }
+function updateCamera(dt) {
+  if (interacting) return;
+  idleTimer += dt;
+  if (idleTimer < 2.5) return;
+  if (!blending) { resumeFrom = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist }; resumeT = 0; blending = true; }
+  autoTime += dt; resumeT = Math.min(3, resumeT + dt);
+  const tgt = autoPose(autoTime), k = smooth(resumeT / 3);
+  cam.yaw = lerpAngle(resumeFrom.yaw, tgt.yaw, k);
+  cam.pitch = resumeFrom.pitch + (tgt.pitch - resumeFrom.pitch) * k;
+  cam.dist = resumeFrom.dist + (tgt.dist - resumeFrom.dist) * k;
+}
+function stopAuto() { blending = false; }
+
+// hint + light indicator
+const hintEl = document.getElementById("hint"), liEl = document.getElementById("light-indicator"), liBar = liEl.querySelector(".bar");
+let hintTimer = 0, liTimer = 0;
+function showHint(text, seconds) { hintEl.textContent = text; hintEl.classList.add("show"); hintTimer = seconds; }
+function setLight(v, label) {
+  lightLevel = Math.min(1.6, Math.max(0.5, v));
+  liBar.style.width = `${Math.round((lightLevel - 0.5) / 1.1 * 100)}%`; liEl.classList.add("show"); liTimer = 1.8;
+  if (label) showHint(`Light ${Math.round(lightLevel * 100)}%`, 1.4);
+}
+showHint("drag orbit · wheel zoom · 1 / 2 / 3 atmosphere · right-drag / shift-drag / L light · R reset · space pause", 4);
+
+function resetAll() {
+  applyMode(0); autoTime = 0; interacting = false; idleTimer = 10; stopAuto();
+  setLight(1.0); paused = false; simTime = 0;
+}
+window.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (k === "1" || k === "2" || k === "3") { applyMode(+k - 1); showHint(MODES[+k - 1].name, 1.6); }
+  else if (k === "l" || k === "д") { setLight(lightLevel >= 1.3 ? 0.65 : lightLevel >= 0.9 ? 1.35 : 1.0, true); }
+  else if (k === "r" || k === "к") { resetAll(); showHint("Reset", 1.4); }
+  else if (k === " ") { e.preventDefault(); paused = !paused; showHint(paused ? "Paused" : "Resumed", 1.4); }
+});
+
+let dragBtn = -1, lastX = 0, lastY = 0;
+canvas.addEventListener("pointerdown", (e) => {
+  if (dragBtn >= 0) return;
+  canvas.setPointerCapture(e.pointerId);
+  dragBtn = (e.button === 2 || e.shiftKey) ? 2 : 0;
+  lastX = e.clientX; lastY = e.clientY; interacting = true; stopAuto(); canvas.classList.add("dragging");
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (dragBtn < 0) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY;
+  if (dragBtn === 2) setLight(lightLevel + dx * 0.004);
+  else { cam.yaw -= dx * 0.0065; cam.pitch = Math.min(1.35, Math.max(0.08, cam.pitch + dy * 0.005)); }
+});
+const endDrag = () => { dragBtn = -1; interacting = false; idleTimer = 0; canvas.classList.remove("dragging"); };
+canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault(); stopAuto();
+  cam.dist = Math.min(14, Math.max(3.2, cam.dist * Math.exp(e.deltaY * 0.0012)));
+  idleTimer = 0;
+}, { passive: false });
+
+// ---------------------------------------------------------------- draw helpers
+const pu = progMain.u, wu = progWater.u;
+function drawMesh(name, model, emisMul = 1) {
+  const o = OBJ[name], mat = o.mat;
+  gl.uniformMatrix4fv(pu.uModel, false, model);
+  gl.uniformMatrix3fv(pu.uNormal, false, M4.normalMat(model));
+  gl.uniform1f(pu.uRough, mat.rough); gl.uniform1f(pu.uMetal, mat.metal); gl.uniform1f(pu.uAlpha, mat.alpha); gl.uniform1f(pu.uRim, mat.rim);
+  gl.uniform1f(pu.uEmissive, (mat.emis || 0) * emisMul);
+  gl.uniform1f(pu.uFade, mat.fade || 0);
+  gl.bindVertexArray(o.vao); gl.drawElements(gl.TRIANGLES, o.count, gl.UNSIGNED_INT, 0);
+}
+function fsPass(prog, target, tex0, tex1) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb); gl.viewport(0, 0, target.w, target.h);
+  gl.useProgram(prog.p);
+  if (tex0) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex0); if (prog.u.uTex) gl.uniform1i(prog.u.uTex, 0); }
+  if (tex1) { gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, tex1); if (prog.u.uBloom) gl.uniform1i(prog.u.uBloom, 1); }
+  gl.bindVertexArray(fsVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// ---------------------------------------------------------------- frame
+let lastT = performance.now(), frameAcc = 0, frameN = 0, slowN = 0;
+function adaptQuality(rawDt) {
+  if (PIN_HQ) return;
+  if (rawDt >= 0.1) { // very slow frames (not one-off hitches): step down after a dozen of them
+    if (++slowN >= 12) { slowN = 0; frameAcc = 0; frameN = 0; if (wantScale > 0.7) { wantScale = Math.max(0.7, wantScale * 0.85); resize(); } }
+    return;
+  }
+  slowN = 0; frameAcc += rawDt; frameN++;
+  if (frameN < 40) return;
+  const avg = frameAcc / frameN; frameAcc = 0; frameN = 0;
+  if (avg > 0.024 && wantScale > 0.7) { wantScale = Math.max(0.7, wantScale * 0.85); resize(); }
+  else if (avg < 0.013 && wantScale < targetScale()) { wantScale = Math.min(targetScale(), wantScale * 1.1); resize(); }
+}
+function frame(now) {
+  const rawDt = Math.min(0.25, Math.max(0, (now - lastT) / 1000)); lastT = now;
+  const dt = rawDt;
+  adaptQuality(rawDt);
+  if (!paused) { simTime += dt; updateCamera(dt); }
+  lerpPal(dt);
+  if (hintTimer > 0) { hintTimer -= dt; if (hintTimer <= 0) hintEl.classList.remove("show"); }
+  if (liTimer > 0) { liTimer -= dt; if (liTimer <= 0) liEl.classList.remove("show"); }
+
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  // pull back on narrow / portrait screens so the watch stays in frame
+  const cd = cam.dist * Math.min(2.3, Math.max(1, Math.pow(1.45 / (W / H), 0.75)));
+  const eye = [cam.target[0] + cd * Math.sin(cam.yaw) * cp, cam.target[1] + cd * sp, cam.target[2] + cd * Math.cos(cam.yaw) * cp];
+  const proj = M4.perspective(FOV, W / H, 0.1, 120);
+  const view = lookAt(eye, cam.target, [0, 1, 0]);
+  const invVP = M4.invert(M4.mul(proj, view));
+  const L = lightLevel;
+  const sunCol = V3.scale(pal.sun, pal.sunK * Math.pow(L, 1.2));
+  const FOG = V3.scale(pal.hor, pal.fogK);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, rtScene.fb); gl.viewport(0, 0, W, H);
+  gl.disable(gl.CULL_FACE); gl.disable(gl.BLEND); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true);
+  // The scene buffer's alpha channel carries particle coverage for FXAA: clear it to 0 and keep every
+  // other draw out of it. Only the sprite pass below writes to it (premultiplied blend accumulates it).
+  gl.colorMask(true, true, true, true);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.colorMask(true, true, true, false);
+
+  // sky
+  gl.depthMask(false); gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(progSky.p);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, dummyTex); gl.uniform1i(progSky.u.uTex, 0);
+  gl.uniformMatrix4fv(progSky.u.uInvVP, false, invVP);
+  gl.uniform3fv(progSky.u.uCam, eye); gl.uniform1f(progSky.u.uTime, simTime);
+  gl.uniform3fv(progSky.u.uTop, pal.top); gl.uniform3fv(progSky.u.uMid, pal.mid); gl.uniform3fv(progSky.u.uHor, pal.hor);
+  gl.uniform3fv(progSky.u.uSunDir, pal.sunDir); gl.uniform3fv(progSky.u.uSunCol, sunCol);
+  gl.uniform3fv(progSky.u.uFogCol, FOG);
+  gl.uniform1f(progSky.u.uStars, pal.stars); gl.uniform1f(progSky.u.uAurora, pal.aurora * (0.6 + 0.4 * L));
+  gl.bindVertexArray(fsVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+
+  // opaque geometry
+  gl.useProgram(progMain.p);
+  gl.uniformMatrix4fv(pu.uProj, false, proj); gl.uniformMatrix4fv(pu.uView, false, view);
+  gl.uniform3fv(pu.uCam, eye); gl.uniform3fv(pu.uSunDir, pal.sunDir); gl.uniform3fv(pu.uSunCol, sunCol);
+  gl.uniform3fv(pu.uSky, pal.mid); gl.uniform3fv(pu.uGround, pal.ground);
+  gl.uniform1f(pu.uTime, simTime); gl.uniform1f(pu.uLightMul, L);
+  LIGHTS.forEach((l, i) => { const k = l.k * pal.pl; LCOL[i*3] = l.col[0]*k; LCOL[i*3+1] = l.col[1]*k; LCOL[i*3+2] = l.col[2]*k; });
+  gl.uniform3fv(pu.uLPos, LPOS); gl.uniform3fv(pu.uLCol, LCOL);
+  gl.uniform3fv(pu.uFog, FOG);
+  for (const [name, model] of STATICS) drawMesh(name, model);
+  // gears (smooth) + escape wheel (ticking)
+  for (const g of GEARS) {
+    let a = g.w * simTime;
+    if (g.escape) { const st = simTime * 4; a = -(Math.PI * 2 / 15) * (Math.floor(st) + smooth(Math.min(1, (st - Math.floor(st)) / 0.3))); }
+    drawMesh(g.name, M4.mul(M4.translate(g.pos[0], g.pos[1], g.pos[2]), M4.rotY(a)));
+    drawMesh("pin", M4.translate(g.pos[0], 0.45, g.pos[2]));
+  }
+  drawMesh("arbor", M4.translate(0, 0.50, 0));
+  const secStep = Math.floor(simTime) + smooth(Math.min(1, (simTime - Math.floor(simTime)) / 0.18));
+  drawMesh("handH", M4.mul(M4.translate(0, 0.500, 0), M4.rotY(-((100 + simTime * 0.00833) * Math.PI / 180))));
+  drawMesh("handM", M4.mul(M4.translate(0, 0.515, 0), M4.rotY(-((210 + simTime * 0.1) * Math.PI / 180))));
+  drawMesh("handS", M4.mul(M4.translate(0, 0.530, 0), M4.rotY(-(secStep * 6 * Math.PI / 180))));
+  // trees (gentle sway, pulsing glow)
+  TREES.forEach((t, i) => {
+    const m = M4.mul(M4.translate(t.x, t.y, t.z), M4.rotZ(Math.sin(simTime * 0.9 + i * 1.7) * 0.03));
+    drawMesh("tree", M4.mul(m, M4.scale(t.s, t.s, t.s)), 0.85 + 0.3 * Math.sin(simTime * 1.6 + i));
+  });
+
+  // velvet (alpha-fades into the night sky), then translucent glass dial
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  drawMesh("velvet", IDENT);
+  gl.depthMask(false);
+  drawMesh("glass", IDENT);
+  // waterfall / rivulet / pool
+  gl.useProgram(progWater.p);
+  gl.uniformMatrix4fv(wu.uProj, false, proj); gl.uniformMatrix4fv(wu.uView, false, view); gl.uniform3fv(wu.uCam, eye);
+  gl.uniform1f(wu.uTime, simTime); gl.uniform1f(wu.uLightMul, L); gl.uniform3f(wu.uPool, POOL[0], 0, POOL[2]);
+  gl.uniform4f(wu.uFall, DIR[0], DIR[2], FALL.r0, FALL.len);
+  gl.uniform3f(wu.uFallW, FALL.w0, FALL.w1, FALL.yCrest);
+  gl.uniform2f(wu.uRiv, RIVDIR[0], RIVDIR[2]);
+  gl.uniformMatrix4fv(wu.uModel, false, IDENT); gl.uniformMatrix3fv(wu.uNormal, false, M4.normalMat(IDENT));
+  gl.bindVertexArray(OBJ.water.vao); gl.drawElements(gl.TRIANGLES, OBJ.water.count, gl.UNSIGNED_INT, 0);
+  // soft particles (premultiplied)
+  gl.useProgram(progPart.p);
+  gl.uniformMatrix4fv(progPart.u.uProj, false, proj); gl.uniformMatrix4fv(progPart.u.uView, false, view);
+  gl.uniform1f(progPart.u.uTime, simTime); gl.uniform1f(progPart.u.uPixelScale, H / (2 * Math.tan(FOV / 2)));
+  gl.uniform1f(progPart.u.uIntensity, 0.9 + 0.5 * L); gl.uniform1f(progPart.u.uMaxPt, MAX_PT);
+  gl.uniform1f(progPart.u.uMinPt, Math.min(MIN_PT * H / innerHeight, MAX_PT));
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.colorMask(true, true, true, true);   // sprites also write their coverage into alpha
+  gl.bindVertexArray(partVao); gl.drawArrays(gl.POINTS, 0, pCount);
+  gl.depthMask(true); gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+
+  // post: bloom chain
+  fsPass(progBright, rtA, rtScene.tex);
+  for (const spread of [1.0, 2.2]) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtB.fb); gl.viewport(0, 0, rtB.w, rtB.h); gl.useProgram(progBlur.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, rtA.tex); gl.uniform1i(progBlur.u.uTex, 0); gl.uniform2f(progBlur.u.uDir, spread, 0);
+    gl.bindVertexArray(fsVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rtA.fb); gl.viewport(0, 0, rtA.w, rtA.h);
+    gl.bindTexture(gl.TEXTURE_2D, rtB.tex); gl.uniform2f(progBlur.u.uDir, 0, spread);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  // composite (ACES) then FXAA to screen
+  gl.useProgram(progFinal.p);
+  gl.uniform1f(progFinal.u.uExposure, pal.exposure * Math.pow(L, 0.6)); gl.uniform1f(progFinal.u.uBloomAmt, pal.bloom);
+  gl.uniform1f(progFinal.u.uVignette, 1.0); gl.uniform3fv(progFinal.u.uTint, pal.tint);
+  fsPass(progFinal, rtLdr, rtScene.tex, rtA.tex);
+  fsPass(progFxaa, { fb: null, w: W, h: H }, rtLdr.tex, null);
+  gl.bindVertexArray(null);
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame((t) => { lastT = t; frame(t); });
+})();
+</script>
+</body>
+</html>
+resize();

@@ -1,0 +1,18 @@
+{
+  "slug": "lighthouse-cross-section-factory",
+  "title": "Lighthouse Cutaway",
+  "category": "showcases",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "A raymarched WebGL2 architectural cutaway of a coastal lighthouse revealing its spiral staircase, living quarters, Fresnel lens, and ocean waves.",
+  "description": "A single-file WebGL2 SDF cutaway showcase slicing open a stone coastal lighthouse on a rocky outcrop to reveal its spiral staircase, interior floors and furnishings, rotating lantern room lens, animated ocean swells, and multi-octave clouds. Drag to orbit, scroll to zoom, press 1–3 for weather presets (Clear Moonlight, Storm, Golden Dawn), Right Drag or L to adjust the sky light, and Space to pause.",
+  "accent": "#ff8a5c",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "SDF",
+    "Water"
+  ],
+  "cover": "cover.webp"
+}

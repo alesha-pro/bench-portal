@@ -1,0 +1,18 @@
+{
+  "slug": "drowned-steeple-factory",
+  "title": "Drowned Steeple",
+  "category": "visuals",
+  "model": "Factory Droid",
+  "version": "November 2026",
+  "summary": "A raymarched WebGL2 flooded stone belfry with a swinging lantern, directional ocean swells, rain ripples, and storm lightning.",
+  "description": "A single-file WebGL2 SDF raymarching scene set around a partially submerged stone steeple rising from dark ocean swells, with wet moss, pointed lancet belfry openings, a swinging warm lantern, concentric raindrop ripples, mist, lightning flashes, and ACES bloom. Drag to orbit, scroll to zoom, press 1–3 for storm intensity, Right Drag or L to aim the light, R to reset, and Space to pause.",
+  "accent": "#7aa8ff",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "Water",
+    "Weather"
+  ],
+  "cover": "cover.webp"
+}

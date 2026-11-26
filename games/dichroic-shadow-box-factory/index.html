@@ -1,0 +1,1661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DICHROIC SHADOW BOX</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; }
+  #c { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+  #c.drag { cursor: grabbing; }
+  #hint {
+    position: fixed; left: 0; right: 0; bottom: 26px; text-align: center;
+    font: 500 11px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: 0.22em; color: rgba(215, 224, 238, 0.62);
+    text-transform: uppercase; pointer-events: none;
+    opacity: 0; transition: opacity 1.1s ease; user-select: none;
+  }
+  #hint.on { opacity: 1; }
+  #hint.off { opacity: 0; }
+  #lind {
+    position: fixed; left: 22px; bottom: 22px;
+    font: 500 11px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: 0.18em; color: rgba(200, 216, 240, 0.7);
+    text-transform: uppercase; pointer-events: none;
+    opacity: 0; transition: opacity 0.45s ease; user-select: none;
+  }
+  #lind.on { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">drag orbit &nbsp;·&nbsp; wheel zoom &nbsp;·&nbsp; 1 / 2 / 3 light &nbsp;·&nbsp; right-drag / L light &nbsp;·&nbsp; R reset &nbsp;·&nbsp; space pause</div>
+<div id="lind"></div>
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/*  Shaders                                                            */
+/* ------------------------------------------------------------------ */
+
+const VERT = `#version 300 es
+out vec2 vUv;
+void main(){
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  vUv = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+/* Shared GLSL: the room, the icosahedron planes, the coating colours and the
+   refracted light path. Used by the scene shader and by the photon mapper. */
+const GLSL_COMMON = `
+uniform vec3  uCC;
+uniform mat3  uRot;
+uniform vec3  uHueAxis;
+
+const float INR  = 0.4926677728;        /* inradius of the crystal (circumradius 0.62) */
+const float IOR  = 1.47;                /* glass, as seen through the crystal */
+const float IORC = 1.16;                /* gentler bending for the projected light paths,
+                                           so the caustics stay a coherent field around the shadow */
+const vec3  BMIN = vec3(-2.80, -1.50, -2.80);
+const vec3  BMAX = vec3( 2.80,  2.30,  2.80);
+const float BS   = 5.60;                /* box span in x and z */
+const vec2  TILE = vec2(1.0 / 3.0, 0.5);/* caustic atlas: 3 x 2 tiles */
+const float PADF = 2.0 / 512.0;         /* 2 px gutter inside a tile */
+
+/* 20 face planes of the icosahedron (local space) */
+const vec3 PN[20] = vec3[20](
+  vec3( 0.57735027,  0.57735027,  0.57735027), vec3( 0.57735027,  0.57735027, -0.57735027),
+  vec3( 0.57735027, -0.57735027,  0.57735027), vec3( 0.57735027, -0.57735027, -0.57735027),
+  vec3(-0.57735027,  0.57735027,  0.57735027), vec3(-0.57735027,  0.57735027, -0.57735027),
+  vec3(-0.57735027, -0.57735027,  0.57735027), vec3(-0.57735027, -0.57735027, -0.57735027),
+  vec3(0.0,  0.35682209,  0.93417236), vec3(0.0,  0.35682209, -0.93417236),
+  vec3(0.0, -0.35682209,  0.93417236), vec3(0.0, -0.35682209, -0.93417236),
+  vec3( 0.35682209, 0.0,  0.93417236), vec3( 0.35682209, 0.0, -0.93417236),
+  vec3(-0.35682209, 0.0,  0.93417236), vec3(-0.35682209, 0.0, -0.93417236),
+  vec3( 0.35682209,  0.93417236, 0.0), vec3( 0.35682209, -0.93417236, 0.0),
+  vec3(-0.35682209,  0.93417236, 0.0), vec3(-0.35682209, -0.93417236, 0.0)
+);
+
+/* saturated 6-stop wheel: teal -> azure -> magenta -> coral -> gold -> emerald */
+const vec3 DC[6] = vec3[6](
+  vec3(0.00, 0.92, 0.78), vec3(0.04, 0.36, 1.00), vec3(1.00, 0.04, 0.56),
+  vec3(1.00, 0.16, 0.12), vec3(1.00, 0.68, 0.04), vec3(0.10, 0.96, 0.30)
+);
+
+float fres(float c){
+  return mix(0.24, 1.0, pow(1.0 - clamp(c, 0.0, 1.0), 4.0));
+}
+
+/* ---------- convex slab intersection (exact, no marching) ---------- */
+void icoSlab(vec3 o, vec3 rd, out float tN, out float tF, out int iN, out int iF,
+             out float dnN, out float dnF){
+  tN = -1e9; tF = 1e9; iN = 0; iF = 0; dnN = 1.0; dnF = 1.0;
+  for (int i = 0; i < 20; i++){
+    float dn = dot(rd, PN[i]);
+    float dp = INR - dot(o, PN[i]);            /* > 0 inside this half-space */
+    if (dn < -1e-6){
+      float t = dp / dn;
+      if (t > tN){ tN = t; iN = i; dnN = -dn; }
+    } else if (dn > 1e-6){
+      float t = dp / dn;
+      if (t < tF){ tF = t; iF = i; dnF = dn; }
+    } else if (dp < 0.0){
+      tN = 1e9; tF = -1e9; return;             /* parallel to a face, outside it */
+    }
+  }
+}
+bool slabHit(float tN, float tF){ return tN <= tF && tF > 0.0; }
+
+/* distance from a surface point (on face f) to the nearest edge of that face */
+float edgeDist(vec3 q, int f){
+  float e = 1e9;
+  for (int i = 0; i < 20; i++){
+    if (i == f) continue;
+    e = min(e, (INR - dot(q, PN[i])) * 1.5);
+  }
+  return e;
+}
+
+/* 2d coordinates on a face (for patterns glued to the facets) */
+vec2 faceUV(vec3 q, int f){
+  vec3 a = abs(PN[f]);
+  if (a.x > a.y && a.x > a.z) return q.yz;
+  if (a.y > a.z) return q.xz;
+  return q.xy;
+}
+
+/* ---------- box interior (analytic, the camera is always inside) ---------- */
+float boxHit(vec3 ro, vec3 rd, out vec3 n){
+  float t = 1e9;
+  n = vec3(0.0, 1.0, 0.0);
+  if (rd.x >  1e-6){ float v = (BMAX.x - ro.x) / rd.x; if (v < t){ t = v; n = vec3(-1.0, 0.0, 0.0); } }
+  if (rd.x < -1e-6){ float v = (BMIN.x - ro.x) / rd.x; if (v < t){ t = v; n = vec3( 1.0, 0.0, 0.0); } }
+  if (rd.y >  1e-6){ float v = (BMAX.y - ro.y) / rd.y; if (v < t){ t = v; n = vec3(0.0, -1.0, 0.0); } }
+  if (rd.y < -1e-6){ float v = (BMIN.y - ro.y) / rd.y; if (v < t){ t = v; n = vec3(0.0,  1.0, 0.0); } }
+  if (rd.z >  1e-6){ float v = (BMAX.z - ro.z) / rd.z; if (v < t){ t = v; n = vec3(0.0, 0.0, -1.0); } }
+  if (rd.z < -1e-6){ float v = (BMIN.z - ro.z) / rd.z; if (v < t){ t = v; n = vec3(0.0, 0.0,  1.0); } }
+  return t;
+}
+
+/* ---------- dichroic coating colour ---------- */
+vec3 dichro(float t){
+  t = fract(t) * 6.0;
+  int k = int(t);
+  float f = t - float(k);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(DC[k], DC[k == 5 ? 0 : k + 1], f);
+}
+
+/* ---------- filament web that modulates the refracted light ---------- */
+float causticPat(vec2 uv, float t){
+  vec2 p = mod(uv * 6.28318530718, 6.28318530718) - 250.0;
+  vec2 i = p;
+  float c = 1.0;
+  const float inten = 0.005;
+  for (int n = 0; n < 4; n++){
+    float tt = t * (1.0 - (3.5 / float(n + 1)));
+    i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
+    c += 1.0 / (length(vec2(p.x / (sin(i.x + tt) / inten),
+                            p.y / (cos(i.y + tt) / inten))) + 1e-4);
+  }
+  c /= 4.0;
+  c = 1.17 - pow(c, 1.4);
+  return pow(abs(c), 10.0);
+}
+
+/* room surface (point + wall normal) -> coordinate in the caustic atlas */
+vec2 atlasUV(vec3 P, vec3 N){
+  vec2 uv;
+  vec2 tile;
+  if (N.x > 0.5){
+    tile = vec2(0.0, 0.0); uv = vec2((P.z - BMIN.z) / BS, (P.y - BMIN.y) / BS);
+  } else if (N.x < -0.5){
+    tile = vec2(1.0, 0.0); uv = vec2((BMAX.z - P.z) / BS, (P.y - BMIN.y) / BS);
+  } else if (N.z > 0.5){
+    tile = vec2(2.0, 0.0); uv = vec2((BMAX.x - P.x) / BS, (P.y - BMIN.y) / BS);
+  } else if (N.z < -0.5){
+    tile = vec2(0.0, 1.0); uv = vec2((P.x - BMIN.x) / BS, (P.y - BMIN.y) / BS);
+  } else if (N.y > 0.5){
+    tile = vec2(1.0, 1.0); uv = (P.xz - BMIN.xz) / BS;
+  } else {
+    tile = vec2(2.0, 1.0); uv = (P.xz - BMIN.xz) / BS;
+  }
+  return (tile + PADF + uv * (1.0 - 2.0 * PADF)) * TILE;
+}
+
+struct Path { vec3 Q; vec3 NQ; float T; float edge; float hue; vec2 uv; bool ok; };
+
+/* Refracted path of a light ray entering the crystal at E1 (face fin) along d0.
+   Q = landing point in the room, col = transmitted coating colour, T = transmission. */
+Path refrPath(vec3 E1, vec3 d0, int fin){
+  mat3 WT = transpose(uRot);
+  vec3 n1 = uRot * PN[fin];
+  vec3 dir = refract(d0, n1, 1.0 / IORC);
+  if (dot(dir, dir) < 0.5) dir = d0;
+  float c1 = abs(dot(d0, n1));
+  float T = 1.0 - fres(c1);
+  vec3 pos = E1;
+  vec3 q  = WT * (pos - uCC);
+  vec3 dl = WT * dir;
+  int fout = fin;
+  float c2 = 1.0;
+  vec3 n2 = n1;
+  bool exited = false;
+  for (int k = 0; k < 8; k++){
+    float tN, tF, dnN, dnF; int iN, iF;
+    icoSlab(q, dl, tN, tF, iN, iF, dnN, dnF);
+    if (tF <= 0.0) break;
+    pos += dir * tF;
+    fout = iF;
+    n2 = uRot * PN[iF];
+    c2 = abs(dot(dir, n2));
+    vec3 od = refract(dir, -n2, IORC);
+    if (dot(od, od) > 0.5){ dir = od; T *= 1.0 - fres(c2); exited = true; break; }
+    dir = reflect(dir, n2);                    /* total internal reflection */
+    dl = WT * dir;
+    q = WT * (pos - uCC) - dl * 1e-4;
+  }
+  vec3 q1 = WT * (E1 - uCC);
+  Path p;
+  p.ok = exited;
+  p.T = 0.0; p.Q = E1; p.NQ = vec3(0.0, 1.0, 0.0);
+  p.edge = 1.0; p.hue = 0.0;
+  p.uv = faceUV(q1, fin);
+  if (!exited) return p;                       /* light trapped inside the glass */
+  vec3 nb;
+  p.Q = pos + dir * boxHit(pos, dir, nb);
+  p.NQ = nb;
+  p.hue = 0.08 + 0.70 * (1.0 - c1) + 0.50 * (1.0 - c2)
+        + 0.45 * dot(n1, uHueAxis) + 0.25 * dot(n2, uHueAxis);
+  p.T = T;
+  p.edge = min(edgeDist(q1, fin), edgeDist(WT * (pos - uCC), fout));
+  return p;
+}
+`;
+
+/* The whole room is traced analytically at native resolution. */
+const SCENE = `#version 300 es
+precision highp float;
+precision highp int;
+out vec4 O;
+
+uniform vec2  uRes;
+uniform vec3  uCamPos;
+uniform vec3  uCamFwd;
+uniform vec3  uCamRight;
+uniform vec3  uCamUp;
+uniform float uFocal;
+uniform vec3  uLPos[2];
+uniform vec3  uLCol[2];
+uniform float uLInt[2];
+uniform mat3  uRot2;
+uniform vec3  uSky;
+uniform float uPhase;
+uniform float uAmb;
+uniform float uSS;
+uniform float uDisp;
+uniform float uBeam;
+uniform float uFloorRef;
+uniform float uCaustic;
+uniform float uInline;
+uniform float uExposure;
+uniform sampler2D uCaus0;
+uniform sampler2D uCaus1;
+${GLSL_COMMON}
+
+const float BEV  = 0.010;            /* bevel / rounded-edge width */
+const float CRAD = 0.26;             /* inner core scale */
+const float LRAD = 0.050;            /* lamp bulb radius */
+
+/* 4-sample dithered pattern (pixels) for supersampling the crystal */
+const vec2 SSO[4] = vec2[4](
+  vec2(-0.375,  0.125), vec2(-0.125, -0.375), vec2(0.125, 0.375), vec2(0.375, -0.125)
+);
+
+float hash3(vec3 p){
+  p = fract(p * 0.3183099 + vec3(0.11, 0.27, 0.39));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float vnoise(vec3 x){
+  vec3 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = mix(mix(hash3(i + vec3(0,0,0)), hash3(i + vec3(1,0,0)), f.x),
+                mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y);
+  float b = mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+                mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y);
+  return mix(a, b, f.z);
+}
+float fbm(vec3 p){
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 3; i++){ s += a * vnoise(p); p *= 2.03; a *= 0.5; }
+  return s;
+}
+
+/* rounded bevel: bend the normal toward the neighbouring faces near the edges */
+vec3 bevelNormal(vec3 q, int f){
+  vec3 nb = PN[f];
+  for (int i = 0; i < 20; i++){
+    if (i == f) continue;
+    float dd = (INR - dot(q, PN[i])) * 1.5;
+    if (dd < BEV){
+      float w = 1.0 - dd / BEV;
+      nb += w * w * PN[i];
+    }
+  }
+  return normalize(nb);
+}
+
+/* ---------- ceiling light strip (explains the ambient + the glass reflections) ---------- */
+float skyMask(vec3 P){
+  vec2 a = abs(P.xz - uCC.xz);
+  float m = (1.0 - smoothstep(0.40, 0.48, a.y)) * (1.0 - smoothstep(1.70, 1.80, a.x));
+  m *= 0.72 + 0.28 * smoothstep(0.30, 0.44, abs(fract(P.x * 2.4) - 0.5));
+  return m;
+}
+float skyFrame(vec3 P){
+  vec2 a = abs(P.xz - uCC.xz);
+  return (1.0 - smoothstep(0.50, 0.56, a.y)) * (1.0 - smoothstep(1.82, 1.90, a.x));
+}
+
+vec3 tonemap(vec3 c){
+  c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, 1.18);
+  return pow(max(c, 0.0), vec3(1.0 / 2.2));
+}
+
+/* ---------- environment seen in the glass ---------- */
+vec3 envSoft(vec3 P, vec3 d){
+  float up = smoothstep(-0.10, 0.90, d.y);
+  vec3 c = mix(vec3(0.10, 0.12, 0.17), vec3(0.85, 0.90, 1.00), up) * up * up * (0.25 + 0.75 * uAmb);
+  c += vec3(0.008, 0.009, 0.012) * smoothstep(0.30, -0.80, d.y);
+  c += vec3(0.16, 0.18, 0.24) * exp(-abs(d.y) * 7.0);
+  if (d.y > 0.02){
+    vec3 pc = P + d * ((BMAX.y - P.y) / d.y);
+    c += uSky * skyMask(pc) * 1.5;
+  }
+  return c;
+}
+
+/* a lamp mirrored by a facet: crisp disc + tight lobes */
+vec3 lampGlow(vec3 P, vec3 d){
+  vec3 c = vec3(0.0);
+  for (int i = 0; i < 2; i++){
+    vec3 lv = uLPos[i] - P;
+    float dist = length(lv);
+    float ca = dot(d, lv / dist);
+    float cr = cos(LRAD * 1.05 / dist);
+    float disc = clamp((ca - cr) * 620.0 + 0.5, 0.0, 1.0);
+    float cp = max(ca, 0.0);
+    c += uLCol[i] * uLInt[i] * (disc * 7.0 + pow(cp, 60.0) * 0.35 + pow(cp, 400.0) * 1.1);
+  }
+  return c;
+}
+
+/* a lamp seen through the glass along an exit ray */
+vec3 lampAlong(vec3 ro, vec3 rd, float tmax){
+  vec3 c = vec3(0.0);
+  for (int i = 0; i < 2; i++){
+    vec3 oc = uLPos[i] - ro;
+    float b = dot(oc, rd);
+    if (b <= 0.0 || b > tmax) continue;
+    float d2 = dot(oc, oc) - b * b;
+    float r = LRAD * (1.0 + b * 0.02);
+    float disc = clamp((r * r - d2) / (r * r * 0.12) + 0.5, 0.0, 1.0);
+    c += uLCol[i] * uLInt[i] * disc * 5.0;
+  }
+  return c;
+}
+
+/* ---------- concrete shadow box ---------- */
+vec3 shadeSurface(vec3 P, vec3 N, vec3 rd){
+  float g1 = fbm(P * 1.65);
+  float g2 = vnoise(P * 7.0);
+  float g3 = vnoise(P * 26.0);
+  vec3 alb = mix(vec3(0.060, 0.062, 0.070), vec3(0.170, 0.173, 0.186), g1);
+  alb *= 0.80 + 0.30 * g2 + 0.14 * g3;
+  float up = smoothstep(-1.50, 2.30, P.y);
+  alb *= mix(0.50, 1.15, up);
+  float isFloor = step(0.5, N.y);
+  float isWall  = 1.0 - step(0.5, abs(N.y));
+
+  /* casting seams on the vertical walls */
+  if (isWall > 0.5){
+    float s = abs(fract(P.y * 0.80 + 0.5) - 0.5) / 0.80;
+    alb *= 1.0 - 0.55 * (1.0 - smoothstep(0.0, 0.020, s));
+    alb *= 1.0 + 0.30 * (smoothstep(0.030, 0.042, s) - smoothstep(0.055, 0.075, s));
+  }
+
+  /* corner occlusion */
+  vec3 dE = min(P - BMIN, BMAX - P);
+  float ao = clamp(min(dE.x, min(dE.y, dE.z)) * 1.3, 0.0, 1.0);
+  alb *= 0.35 + 0.65 * ao;
+
+  vec3 col = alb * (vec3(0.30, 0.38, 0.66) * (uAmb * 0.55) + vec3(0.014, 0.017, 0.026));
+
+  if (N.y < -0.5){
+    col += uSky * skyMask(P) * 2.2;
+    col *= 1.0 - 0.5 * skyFrame(P);
+  }
+
+  vec2 auv = atlasUV(P, N);
+  mat3 WT = transpose(uRot);
+
+  for (int i = 0; i < 2; i++){
+    vec3 Lv = uLPos[i] - P;
+    float dist = length(Lv);
+    vec3 Ld = Lv / dist;
+    float ndl = max(dot(N, Ld), 0.0);
+    if (ndl <= 0.0005) continue;
+    float att = 1.0 / (1.0 + 0.05 * dist * dist);
+    vec3 axis = normalize(uCC - uLPos[i]);
+    float ca = dot(-Ld, axis);
+    float cone = smoothstep(0.885, 0.975, ca);
+    float fill = smoothstep(-0.20, 0.90, ca) * 0.020;
+
+    /* is this light ray blocked by the crystal? (soft penumbra at the rim) */
+    vec3 ol = WT * (uLPos[i] - uCC);
+    vec3 d0 = -Ld;
+    float tN, tF, dnN, dnF; int iN, iF;
+    icoSlab(ol, WT * d0, tN, tF, iN, iF, dnN, dnF);
+    vec3 toc = uCC - uLPos[i];
+    vec3 uu = toc - d0 * dot(toc, d0);
+    float ul = length(uu);
+    uu = ul > 1e-6 ? uu / ul : vec3(0.0, 1.0, 0.0);
+    float g = max(dot(uu, PN[iF]) / max(dnF, 0.05) + dot(uu, -PN[iN]) / max(dnN, 0.05), 0.30);
+    float sd = (tF - tN) / g;                       /* > 0 : passes through the crystal */
+    float pen = 0.02 * max(dist - max(tN, 0.0), 0.0) + 0.003;
+    float sh = smoothstep(-pen, pen, sd);
+
+    float I = uLInt[i] * att * ndl * (cone + fill);
+    if (I > 0.0005){
+      col += alb * uLCol[i] * I * (1.0 - sh);
+      /* polished sheen (stronger on the sealed floor) */
+      vec3 H = normalize(Ld - rd);
+      float sheen = pow(max(dot(N, H), 0.0), isFloor > 0.5 ? 34.0 : 12.0) * (isFloor > 0.5 ? 0.11 : 0.035);
+      col += uLCol[i] * uLInt[i] * att * cone * sheen * (1.0 - sh);
+    }
+
+    /* light refracted through the crystal (photon caustics), hue-preserving soft knee
+       so the focused core of the pool stays coloured instead of clipping to white */
+    vec3 cc = (i == 0) ? texture(uCaus0, auv).rgb : texture(uCaus1, auv).rgb;
+    cc *= uCaustic;
+    cc *= 1.0 / (1.0 + 0.62 * max(cc.r, max(cc.g, cc.b)));
+    col += cc * (0.60 + 2.0 * alb);
+  }
+
+  /* light bounced off the glowing crystal */
+  vec3 toC = uCC - P;
+  float dC = length(toC);
+  float ndC = max(dot(N, toC / dC), 0.0);
+  col += dichro(0.10 + 0.22 * sin(uPhase * 0.6)) * ndC * 0.08 / (1.0 + dC * dC * 2.2);
+  return col;
+}
+
+/* ---------- faceted core inside the glass ---------- */
+vec3 shadeCore(vec3 P, int f, vec3 rd){
+  mat3 WT2 = transpose(uRot2);
+  vec3 q = WT2 * (P - uCC) / CRAD;
+  vec3 n = uRot2 * PN[f];
+  float ndv = abs(dot(n, rd));
+  float e = edgeDist(q, f);
+  float ph = 0.05 + 0.80 * (1.0 - ndv) + 0.55 * dot(n, normalize(vec3(0.4, 0.8, 0.3))) + 0.06 * uPhase;
+  vec3 c = dichro(ph);
+  vec3 col = c * (0.70 + 0.30 * ndv);
+  for (int i = 0; i < 2; i++){
+    vec3 Ld = normalize(uLPos[i] - P);
+    float nl = max(dot(n, Ld), 0.0);
+    col += mix(uLCol[i], vec3(1.0), 0.3) * uLInt[i]
+         * (0.035 * nl * nl + 0.30 * pow(max(dot(reflect(rd, n), Ld), 0.0), 60.0));
+  }
+  col += mix(c, vec3(1.0), 0.5) * exp(-e * 110.0) * 1.1;
+  return col;
+}
+
+/* light arriving at the entry point after travelling through the glass */
+vec3 traceTrans(vec3 P1, vec3 N1w, vec3 rd, float ior, out float plen, out float T2, out float info){
+  mat3 WT = transpose(uRot);
+  mat3 WT2 = transpose(uRot2);
+  T2 = 1.0;
+  plen = 0.0;
+  info = 0.0;
+  vec3 pos = P1;
+  vec3 dir = refract(rd, N1w, 1.0 / ior);
+  if (dot(dir, dir) < 0.5) dir = rd;
+
+  /* inner core */
+  {
+    vec3 co = WT2 * (pos - uCC) / CRAD;
+    vec3 cd = WT2 * dir;
+    float tN, tF, dnN, dnF; int iN, iF;
+    icoSlab(co, cd, tN, tF, iN, iF, dnN, dnF);
+    if (slabHit(tN, tF)){
+      plen += tN * CRAD;
+      info = 1.0;
+      return shadeCore(pos + dir * (tN * CRAD), iN, dir);
+    }
+  }
+
+  vec3 q = WT * (pos - uCC);
+  vec3 dl = WT * dir;
+  bool exited = false;
+  for (int k = 0; k < 8; k++){
+    float tN, tF, dnN, dnF; int iN, iF;
+    icoSlab(q, dl, tN, tF, iN, iF, dnN, dnF);
+    if (tF <= 0.0) break;
+    plen += tF;
+    pos += dir * tF;
+    vec3 n2 = uRot * PN[iF];
+    float cInc = abs(dot(dir, n2));
+    vec3 od = refract(dir, -n2, ior);
+    if (dot(od, od) > 0.5){
+      dir = od;
+      T2 = 1.0 - fres(cInc);
+      exited = true;
+      break;
+    }
+    dir = reflect(dir, n2);                    /* total internal reflection */
+    dl = WT * dir;
+    q = WT * (pos - uCC) - dl * 1e-4;
+    info += 1.0;
+  }
+  if (!exited){
+    /* light trapped by total internal reflection: absorbed inside the glass */
+    info = 9.0;
+    return vec3(0.0);
+  }
+  vec3 nb;
+  float tw = boxHit(pos, dir, nb);
+  return shadeSurface(pos + dir * tw, nb, dir) + lampAlong(pos, dir, tw);
+}
+
+/* ---------- the dichroic glass crystal ---------- */
+vec3 shadeCrystal(vec3 ro, vec3 rd, float tN, int iN){
+  mat3 WT = transpose(uRot);
+  vec3 P1 = ro + rd * tN;
+  vec3 q1 = WT * (P1 - uCC);
+  vec3 N1w = uRot * bevelNormal(q1, iN);
+  vec3 Nflat = uRot * PN[iN];
+
+  vec3 V = -rd;
+  float ndv = clamp(dot(N1w, V), 0.0, 1.0);
+  float F = fres(ndv);
+
+  /* iridescence: the hue runs a full turn of the wheel from the facets facing the eye
+     (magenta) over the middle ring (gold) to the grazing rim (teal), with a per-facet offset */
+  float ph = 0.06 + 3.0 * pow(max(1.0 - ndv, 1e-4), 0.70) + 0.35 * dot(Nflat, uHueAxis) + 0.03 * uPhase;
+  vec3 cR = dichro(ph);                 /* coating reflection colour */
+  vec3 cT = dichro(ph + 0.3333);         /* transmitted colour (its complement) */
+
+  /* reflection of the room in the coating */
+  vec3 R = reflect(rd, N1w);
+  vec3 col = envSoft(P1, R) * cR * F;
+
+  /* specular highlights from the two spotlights. A dichroic coating tints its own
+     reflection, so the lobes take the coating colour and only the core sparkles white. */
+  for (int i = 0; i < 2; i++){
+    vec3 Ld = normalize(uLPos[i] - P1);
+    float nh = max(dot(N1w, normalize(Ld - rd)), 0.0);
+    float broad = pow(nh, 8.0) * 0.06 + pow(nh, 24.0) * 0.24;
+    float tight = pow(nh, 200.0) * 0.5 + pow(nh, 1200.0) * 6.0;
+    col += mix(uLCol[i], vec3(1.0), 0.5) * uLInt[i]
+         * (broad * mix(cR, vec3(1.0), 0.25) + tight * mix(cR, vec3(1.0), 0.8));
+  }
+  col += lampGlow(P1, R) * mix(cR, vec3(1.0), 0.8) * F;
+
+  /* transmission through the glass */
+  vec3 bg;
+  float plen = 0.0;
+  float T2 = 1.0;
+  float info = 0.0;
+  if (uDisp > 0.5){
+    float pa, pb, ta, tb, ia, ib;
+    vec3 bR = traceTrans(P1, N1w, rd, IOR - 0.012, pa, ta, ia);
+    vec3 bG = traceTrans(P1, N1w, rd, IOR,        plen, T2, info);
+    vec3 bB = traceTrans(P1, N1w, rd, IOR + 0.014, pb, tb, ib);
+    bg = vec3(bR.r, bG.g, bB.b);
+  } else {
+    bg = traceTrans(P1, N1w, rd, IOR, plen, T2, info);
+  }
+  /* thick paths absorb their complement -> deeper colour */
+  vec3 tint = cT * exp(-plen * 1.5 * (1.0 - cT));
+  if (info < 0.5) tint = mix(vec3(1.0), cT, 0.45);          /* the glowing core keeps its own hue */
+  col += bg * tint * (1.0 - F) * T2;
+
+  /* body colour of the translucent glass */
+  col += cT * (1.0 - F) * 0.065;
+
+  /* saturated Fresnel rim */
+  col += cR * pow(1.0 - ndv, 5.0) * 1.6;
+
+  return col;
+}
+
+vec3 shadeWall(vec3 ro, vec3 rd, vec3 P, vec3 N){
+  vec3 col = shadeSurface(P, N, rd);
+  /* polished floor: slightly wavy mirror image of the levitating crystal */
+  if (N.y > 0.5 && uFloorRef > 0.0){
+    float gx = vnoise(P * 9.0 + vec3(0.31, 0.0, 0.17)) - vnoise(P * 9.0);
+    float gz = vnoise(P * 9.0 + vec3(0.0, 0.0, 0.47)) - vnoise(P * 9.0);
+    vec3 nn = normalize(N + vec3(gx, 0.0, gz) * 0.55);
+    vec3 R = reflect(rd, nn);
+    mat3 WT = transpose(uRot);
+    float aN, aF, aDN, aDF; int aI, aJ;
+    icoSlab(WT * (P - uCC), WT * R, aN, aF, aI, aJ, aDN, aDF);
+    if (slabHit(aN, aF)){
+      vec3 rc = shadeCrystal(P, R, aN, aI);
+      float ndv = clamp(dot(N, -rd), 0.0, 1.0);
+      float fr = uFloorRef * (0.30 + 0.70 * pow(1.0 - ndv, 3.0)) * exp(-aN * 0.25);
+      col += rc * fr;
+    }
+  }
+  return col;
+}
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+  vec3 ro = uCamPos;
+  vec3 rd = normalize(uCamFwd * uFocal + uCamRight * uv.x + uCamUp * uv.y);
+  mat3 WT = transpose(uRot);
+
+  vec3 nb;
+  float tb = boxHit(ro, rd, nb);
+  vec3 Pb = ro + rd * tb;
+
+  /* crystal slabs for the centre ray */
+  vec3 ol = WT * (ro - uCC);
+  vec3 dl = WT * rd;
+  float tN, tF, dnN, dnF; int iN, iF;
+  icoSlab(ol, dl, tN, tF, iN, iF, dnN, dnF);
+  bool hitC = slabHit(tN, tF) && tN < tb;
+  float tC = hitC ? tN : -1.0;
+
+  /* signed distance (in pixels) from the ray to the crystal silhouette */
+  vec3 toC = uCC - ro;
+  vec3 udir = toC - rd * dot(toC, rd);
+  float ul = length(udir);
+  udir = ul > 1e-6 ? udir / ul : vec3(0.0, 1.0, 0.0);
+  int jF = iF < 0 ? 0 : iF;
+  float g = max(dot(udir, PN[jF]) / max(dnF, 0.05) + dot(udir, -PN[iN]) / max(dnN, 0.05), 0.30);
+  float pxs = max(tN, 0.0) / (uFocal * uRes.y) + 1e-6;
+  float sil = (tF - tN) / g / pxs;
+
+  vec3 col;
+  float cov = 0.0;
+  if (sil <= -1.5){
+    col = shadeWall(ro, rd, Pb, nb);
+  } else {
+    /* crystal region: supersampled with a dithered 2x2 pattern so facets, bevels and
+       the rim stay clean; the 3 px silhouette band gets a full 4x4 grid for a smooth edge */
+    int ns = (uSS > 0.5) ? ((sil < 1.5) ? 16 : 4) : 1;
+    vec3 accC = vec3(0.0);
+    float hits = 0.0;
+    for (int s = 0; s < 16; s++){
+      if (s >= ns) break;
+      vec3 rds = rd;
+      if (ns == 16){
+        vec2 o = (vec2(float(s & 3), float(s >> 2)) + 0.5) * 0.25 - 0.5;
+        rds = normalize(uCamFwd * uFocal + uCamRight * (uv.x + o.x / uRes.y) + uCamUp * (uv.y + o.y / uRes.y));
+      } else if (ns == 4){
+        vec2 o = SSO[s];
+        rds = normalize(uCamFwd * uFocal + uCamRight * (uv.x + o.x / uRes.y) + uCamUp * (uv.y + o.y / uRes.y));
+      }
+      float aN, aF, aDN, aDF; int aI, aJ;
+      icoSlab(WT * (ro - uCC), WT * rds, aN, aF, aI, aJ, aDN, aDF);
+      if (slabHit(aN, aF) && aN < tb){
+        accC += shadeCrystal(ro, rds, aN, aI);
+        hits += 1.0;
+      }
+    }
+    cov = hits / float(ns);
+    vec3 cc = accC / float(ns);
+    if (cov >= 0.999) col = cc;
+    else col = cc + shadeWall(ro, rd, Pb, nb) * (1.0 - cov);
+  }
+
+  /* lamp fixtures: dark housing + hot bulb + soft glare */
+  float px = 1.0 / (uFocal * uRes.y);
+  for (int i = 0; i < 2; i++){
+    vec3 oc = uLPos[i] - ro;
+    float dist = length(oc);
+    vec3 lv = oc / dist;
+    bool occluded = slabHit(tN, tF) && tN > 0.0 && tN < dist;
+    if (occluded) continue;
+    float ang = acos(clamp(dot(rd, lv), -1.0, 1.0));
+    float angR = asin(clamp(LRAD / dist, 0.0, 1.0));
+    float disc = clamp((angR - ang) / px + 0.5, 0.0, 1.0);
+    float x = max(ang - angR, 0.0);
+    float halo = exp(-x * x * 1100.0) * 0.12;
+    vec3 hc = uLPos[i] - normalize(uCC - uLPos[i]) * 0.075 - ro;
+    float hb = dot(hc, rd);
+    float hd = sqrt(max(dot(hc, hc) - hb * hb, 0.0));
+    float housing = (hb > 0.0) ? clamp((0.082 - hd) / (px * hb) + 0.5, 0.0, 1.0) : 0.0;
+    float ring = housing * (1.0 - disc);
+    col = mix(col, vec3(0.030, 0.032, 0.038) * (0.6 + 0.6 * uAmb), ring);
+    col += uLCol[i] * uLInt[i] * (mix(uLCol[i], vec3(1.0), 0.45) * disc * 5.0 + halo);
+  }
+
+  /* faint volumetric beams (hazy air), shadowed behind the crystal */
+  if (uBeam > 0.0){
+    float tFar = (tC > 0.0) ? tC : tb;
+    for (int i = 0; i < 2; i++){
+      vec3 axis = normalize(uCC - uLPos[i]);
+      const float BL = 3.0;
+      vec3 bc = uLPos[i] + axis * (BL * 0.5);
+      vec3 oc = ro - bc;
+      float b = dot(oc, rd);
+      float c = dot(oc, oc) - BL * BL * 0.25;
+      float h = b * b - c;
+      if (h < 0.0) continue;
+      float t0 = max(-b - sqrt(h), 0.0);
+      float t1 = min(-b + sqrt(h), tFar);
+      if (t1 <= t0) continue;
+      float st = (t1 - t0) / 8.0;
+      float accB = 0.0;
+      vec3 w = uCC - uLPos[i];
+      for (int k = 0; k < 8; k++){
+        vec3 p = ro + rd * (t0 + st * (float(k) + 0.5));
+        vec3 lv = uLPos[i] - p;
+        float d = length(lv);
+        vec3 ldn = lv / d;
+        float ca = dot(-ldn, axis);
+        float dens = smoothstep(0.940, 0.985, ca);
+        if (dens > 0.0){
+          float tp = dot(w, -ldn);
+          float dcr = length(w + ldn * tp);
+          float sh = (tp > 0.0 && tp < d) ? smoothstep(INR * 0.85, INR * 1.3, dcr) : 1.0;
+          accB += dens * sh / (1.0 + 0.35 * d * d);
+        }
+      }
+      col += uLCol[i] * uLInt[i] * (accB * st * uBeam);
+    }
+  }
+
+  col = max(col, vec3(0.0));
+  if (uInline > 0.5){
+    /* no float render targets: tone-map right here, bloom is skipped */
+    vec2 vq = gl_FragCoord.xy / uRes - 0.5;
+    col *= 1.0 - 0.30 * smoothstep(0.12, 0.50, dot(vq, vq));
+    col = tonemap(col * uExposure);
+  }
+  O = vec4(col, cov);
+}`;
+
+/* Caustic photon mapper: one texel = one light ray shot from a spotlight
+   through the crystal. Outputs where the ray lands in the caustic atlas. */
+const PHOTON = `#version 300 es
+precision highp float;
+precision highp int;
+out vec4 O;
+uniform vec3  uLPos;
+uniform vec3  uAxis;
+uniform vec3  uU;
+uniform vec3  uW;
+uniform float uTanR;
+uniform vec2  uTableSize;
+uniform float uWeight;
+uniform float uPhase;
+${GLSL_COMMON}
+void main(){
+  ivec2 tc = ivec2(gl_FragCoord.xy);
+  /* hashed (white-noise) directions over the cone: a regular grid would show up as
+     row hatching wherever the refracted map stretches a facet class into a thin fleck */
+  vec2 h = fract(sin(vec2(dot(vec2(tc), vec2(127.1, 311.7)), dot(vec2(tc), vec2(269.5, 183.3)))) * 43758.5453);
+  vec2 sp = vec2(tc) + h;
+  vec2 s = (sp / uTableSize) * 2.0 - 1.0;
+
+  /* square -> disc (concentric map), keeps the stratification */
+  float r, phi;
+  if (s.x > -s.y){
+    if (s.x > s.y){ r = s.x;  phi = 0.78539816 * s.y / s.x; }
+    else          { r = s.y;  phi = 1.57079633 - 0.78539816 * s.x / s.y; }
+  } else {
+    if (s.x < s.y){ r = -s.x; phi = 3.14159265 + 0.78539816 * s.y / s.x; }
+    else          { r = -s.y; phi = 4.71238898 - 0.78539816 * s.x / s.y; }
+  }
+  if (r < 1e-6){ r = 0.0; phi = 0.0; }
+  vec2 disc = r * vec2(cos(phi), sin(phi));
+  vec3 dir = normalize(uAxis + (uU * disc.x + uW * disc.y) * uTanR);
+
+  mat3 WT = transpose(uRot);
+  float tN, tF, dnN, dnF; int iN, iF;
+  icoSlab(WT * (uLPos - uCC), WT * dir, tN, tF, iN, iF, dnN, dnF);
+  if (!slabHit(tN, tF)){ O = vec4(0.0); return; }
+  Path p = refrPath(uLPos + dir * tN, dir, iN);
+  if (!p.ok){ O = vec4(0.0); return; }
+
+  float pat = causticPat(p.uv * 3.0 + vec2(0.0, uPhase * 0.02), uPhase * 0.45);
+  float rim = exp(-p.edge * 60.0);
+  float w = uWeight * p.T * (0.55 + 1.2 * pat + 0.8 * rim);
+  O = vec4(atlasUV(p.Q, p.NQ), p.hue, w);
+}`;
+
+/* Splat the photon table into the atlas as single pixels (additive).
+   rgb = refracted colour, a = photon count (drives the adaptive smoothing). */
+const SPLAT_V = `#version 300 es
+precision highp float;
+uniform sampler2D uTable;
+uniform vec2 uTableSize;
+uniform vec3 uLCol;
+out vec3 vCol;
+out float vW;
+${GLSL_COMMON}
+void main(){
+  int id = gl_VertexID;
+  ivec2 tc = ivec2(id % int(uTableSize.x), id / int(uTableSize.x));
+  vec4 ph = texelFetch(uTable, tc, 0);
+  vCol = dichro(ph.z) * mix(vec3(1.0), uLCol, 0.45) * ph.w;
+  vW = 1.0;
+  gl_Position = (ph.w > 0.0) ? vec4(ph.xy * 2.0 - 1.0, 0.0, 1.0) : vec4(4.0, 4.0, 4.0, 1.0);
+  gl_PointSize = 1.0;
+}`;
+const SPLAT_F = `#version 300 es
+precision highp float;
+in vec3 vCol;
+in float vW;
+out vec4 O;
+void main(){ O = vec4(vCol, vW); }`;
+
+/* Small separable blur that never leaks across atlas tiles. */
+const ABLUR = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 O;
+uniform sampler2D uTex; uniform vec2 uDir;
+void main(){
+  vec2 tile = floor(vUv / vec2(1.0 / 3.0, 0.5));
+  vec2 lo = (tile + 2.5 / 512.0) * vec2(1.0 / 3.0, 0.5);
+  vec2 hi = (tile + 1.0 - 2.5 / 512.0) * vec2(1.0 / 3.0, 0.5);
+  vec4 s = texture(uTex, vUv) * 0.227027;
+  s += (texture(uTex, clamp(vUv + uDir * 1.384615, lo, hi))
+      + texture(uTex, clamp(vUv - uDir * 1.384615, lo, hi))) * 0.316216;
+  s += (texture(uTex, clamp(vUv + uDir * 3.230769, lo, hi))
+      + texture(uTex, clamp(vUv - uDir * 3.230769, lo, hi))) * 0.070270;
+  O = s;
+}`;
+
+/* Density-adaptive smoothing over three scales: the dense core of the caustic pool
+   stays sharp, mid-density zones get a light blur (hides texel rows at grazing
+   angles) and the sparse flecks melt into soft glows instead of a photon speckle. */
+const ACOMB = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 O;
+uniform sampler2D uSharp; uniform sampler2D uMid; uniform sampler2D uWide;
+void main(){
+  vec4 s = texture(uSharp, vUv);
+  vec4 m = texture(uMid, vUv);
+  vec4 w = texture(uWide, vUv);
+  /* s.a is the local photon density (rays per atlas texel) */
+  vec3 c = mix(w.rgb, m.rgb, smoothstep(0.8, 2.2, s.a));
+  c = mix(c, s.rgb, smoothstep(6.0, 16.0, s.a));
+  O = vec4(c, 1.0);
+}`;
+
+const BRIGHT = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 O;
+uniform sampler2D uTex; uniform float uThresh;
+void main(){
+  vec3 c = texture(uTex, vUv).rgb;
+  float l = max(max(c.r, c.g), c.b);
+  float k = max(l - uThresh, 0.0) / max(l, 1e-4);
+  O = vec4(c * k, 1.0);
+}`;
+
+const BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 O;
+uniform sampler2D uTex; uniform vec2 uDir;
+void main(){
+  vec3 s = texture(uTex, vUv).rgb * 0.227027;
+  s += texture(uTex, vUv + uDir * 1.384615).rgb * 0.316216;
+  s += texture(uTex, vUv - uDir * 1.384615).rgb * 0.316216;
+  s += texture(uTex, vUv + uDir * 3.230769).rgb * 0.070270;
+  s += texture(uTex, vUv - uDir * 3.230769).rgb * 0.070270;
+  O = vec4(s, 1.0);
+}`;
+
+const COMPOSITE = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 O;
+uniform sampler2D uScene; uniform sampler2D uBloom;
+uniform float uExposure; uniform float uBloomAmt;
+vec3 aces(vec3 x){
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+void main(){
+  vec4 s = texture(uScene, vUv);
+  vec3 c = s.rgb + texture(uBloom, vUv).rgb * uBloomAmt;
+  vec2 q = vUv - 0.5;
+  c *= 1.0 - 0.30 * smoothstep(0.12, 0.50, dot(q, q));
+  c = aces(c * uExposure);
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, 1.18);
+  c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+  c = c * 0.992 + 0.004;
+  O = vec4(c, s.a);
+}`;
+
+/* Edge anti-aliasing for the room (caustic borders, lamp rims).
+   The crystal is supersampled on its own, so its pixels are left untouched. */
+const FXAA = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 O;
+uniform sampler2D uTex; uniform vec2 uTexel;
+float bayer2(vec2 a){ a = floor(a); return fract(a.x / 2.0 + a.y * a.y * 0.75); }
+float bayer4(vec2 a){ return bayer2(0.5 * a) * 0.25 + bayer2(a); }
+void main(){
+  vec3 luma = vec3(0.299, 0.587, 0.114);
+  vec4 NW = texture(uTex, vUv + vec2(-1.0, -1.0) * uTexel);
+  vec4 NE = texture(uTex, vUv + vec2( 1.0, -1.0) * uTexel);
+  vec4 SW = texture(uTex, vUv + vec2(-1.0,  1.0) * uTexel);
+  vec4 SE = texture(uTex, vUv + vec2( 1.0,  1.0) * uTexel);
+  vec4 M  = texture(uTex, vUv);
+  float w = 1.0 - clamp(max(max(NW.a, NE.a), max(SW.a, SE.a)), 0.0, 1.0);
+  vec3 rgbNW = NW.rgb, rgbNE = NE.rgb, rgbSW = SW.rgb, rgbSE = SE.rgb, rgbM = M.rgb;
+  float lNW = dot(rgbNW, luma), lNE = dot(rgbNE, luma);
+  float lSW = dot(rgbSW, luma), lSE = dot(rgbSE, luma);
+  float lM  = dot(rgbM,  luma);
+  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
+  float dirReduce = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125);
+  float rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+  dir = clamp(dir * rcp, vec2(-8.0), vec2(8.0)) * uTexel;
+  vec3 rgbA = 0.5 * (texture(uTex, vUv + dir * (1.0 / 3.0 - 0.5)).rgb
+                   + texture(uTex, vUv + dir * (2.0 / 3.0 - 0.5)).rgb);
+  vec3 rgbB = rgbA * 0.5 + 0.25 * (texture(uTex, vUv + dir * -0.5).rgb
+                                 + texture(uTex, vUv + dir *  0.5).rgb);
+  float lB = dot(rgbB, luma);
+  vec3 aa = (lB < lMin || lB > lMax) ? rgbA : rgbB;
+  vec3 c = mix(M.rgb, aa, w);
+  c += (bayer4(gl_FragCoord.xy) - 0.5) * (1.6 / 255.0);
+  O = vec4(c, 1.0);
+}`;
+
+/* Sharp Catmull-Rom upscaler, only used on very large canvases (above the pixel budget).
+   Constant swizzles only: dynamic vector indexing is unreliable on some drivers. */
+const UPSCALE = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 O;
+uniform sampler2D uTex; uniform vec2 uTexel;
+/* Catmull-Rom weights for the 4 taps at distances d (sum to 1) */
+vec4 crw(float x){
+  vec4 d = vec4(x + 1.0, x, 1.0 - x, 2.0 - x);
+  vec4 inner = step(d, vec4(1.0));
+  vec4 a3 = mix(vec4(-0.5), vec4(1.5), inner);
+  vec4 a2 = mix(vec4( 2.5), vec4(-2.5), inner);
+  vec4 a1 = mix(vec4(-4.0), vec4(0.0), inner);
+  vec4 a0 = mix(vec4( 2.0), vec4(1.0), inner);
+  return a3 * d * d * d + a2 * d * d + a1 * d + a0;
+}
+vec3 crRow(vec2 uv, vec2 dx, vec4 wx, float wy){
+  return (texture(uTex, uv).rgb * wx.x + texture(uTex, uv + dx).rgb * wx.y
+        + texture(uTex, uv + 2.0 * dx).rgb * wx.z + texture(uTex, uv + 3.0 * dx).rgb * wx.w) * wy;
+}
+float bayer2(vec2 a){ a = floor(a); return fract(a.x / 2.0 + a.y * a.y * 0.75); }
+float bayer4(vec2 a){ return bayer2(0.5 * a) * 0.25 + bayer2(a); }
+void main(){
+  vec2 p = vUv / uTexel - 0.5;
+  vec2 b = floor(p);
+  vec2 f = p - b;
+  vec4 wx = crw(f.x), wy = crw(f.y);
+  vec2 dx = vec2(uTexel.x, 0.0), dy = vec2(0.0, uTexel.y);
+  vec2 base = (b - 0.5) * uTexel;
+  vec3 c = crRow(base, dx, wx, wy.x)
+         + crRow(base + dy, dx, wx, wy.y)
+         + crRow(base + 2.0 * dy, dx, wx, wy.z)
+         + crRow(base + 3.0 * dy, dx, wx, wy.w);
+  c += (bayer4(gl_FragCoord.xy) - 0.5) * (1.6 / 255.0);
+  O = vec4(max(c, 0.0), 1.0);
+}`;
+
+/* ------------------------------------------------------------------ */
+/*  GL bootstrap                                                       */
+/* ------------------------------------------------------------------ */
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2', {
+  antialias: false, alpha: false, depth: false, stencil: false,
+  preserveDrawingBuffer: false, powerPreference: 'high-performance'
+});
+if (!gl){
+  document.body.innerHTML = '<p style="color:#ccc;font:14px monospace;padding:24px">WebGL2 is required.</p>';
+  throw new Error('WebGL2 unavailable');
+}
+
+const floatOK = !!gl.getExtension('EXT_color_buffer_float');
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    const log = gl.getShaderInfoLog(s);
+    console.error('Shader compile error:', log, '\n', src);
+    throw new Error('Shader compile failed: ' + log);
+  }
+  return s;
+}
+function program(vsSrc, fsSrc){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)){
+    const log = gl.getProgramInfoLog(p);
+    console.error('Program link error:', log);
+    throw new Error('Program link failed: ' + log);
+  }
+  return p;
+}
+
+const progScene  = program(VERT, SCENE);
+const progPhoton = program(VERT, PHOTON);
+const progSplat  = program(SPLAT_V, SPLAT_F);
+const progABlur  = program(VERT, ABLUR);
+const progAComb  = program(VERT, ACOMB);
+const progBright = program(VERT, BRIGHT);
+const progBlur   = program(VERT, BLUR);
+const progComp   = program(VERT, COMPOSITE);
+const progFxaa   = program(VERT, FXAA);
+const progUp     = program(VERT, UPSCALE);
+
+const locCache = new Map();
+function U(prog, name){
+  const key = prog._id + ':' + name;
+  let v = locCache.get(key);
+  if (v === undefined){ v = gl.getUniformLocation(prog, name); locCache.set(key, v); }
+  return v;
+}
+let progId = 0;
+for (const p of [progScene, progPhoton, progSplat, progABlur, progAComb, progBright, progBlur, progComp, progFxaa, progUp]) p._id = progId++;
+
+function makeTex(w, h, useFloat, iFormat){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  if (useFloat){
+    gl.texImage2D(gl.TEXTURE_2D, 0, iFormat || gl.RGBA16F, w, h, 0, gl.RGBA, gl.FLOAT, null);
+  } else {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  }
+  return t;
+}
+function makeFBO(tex){
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (st !== gl.FRAMEBUFFER_COMPLETE) throw new Error('Framebuffer incomplete: 0x' + st.toString(16));
+  return f;
+}
+
+gl.disable(gl.DEPTH_TEST);
+gl.disable(gl.BLEND);
+gl.disable(gl.CULL_FACE);
+
+/* ------------------------------------------------------------------ */
+/*  Scene state                                                        */
+/* ------------------------------------------------------------------ */
+
+const CENTER_Y = 0.10;
+const LIGHT_RADIUS = 2.25;
+
+const PRESETS = [
+  { /* 1 - warm sunset key + cool rim */
+    name: 'warm sunset key + cool rim',
+    l0: { dir: [ 0.62,  0.62,  0.40], col: [1.00, 0.56, 0.22], int: 3.6 },
+    l1: { dir: [-0.72,  0.30, -0.62], col: [0.22, 0.50, 1.00], int: 1.9 },
+    amb: 0.44, exp: 1.00, beam: 0.009, sky: [0.50, 0.47, 0.46]
+  },
+  { /* 2 - dual neon spotlights */
+    name: 'dual neon spotlights',
+    l0: { dir: [ 0.78,  0.42,  0.34], col: [1.00, 0.08, 0.55], int: 4.2 },
+    l1: { dir: [-0.72,  0.40,  0.42], col: [0.05, 0.84, 1.00], int: 4.2 },
+    amb: 0.26, exp: 1.00, beam: 0.020, sky: [0.22, 0.27, 0.36]
+  },
+  { /* 3 - stark white museum beam */
+    name: 'stark white museum beam',
+    l0: { dir: [ 0.14,  0.92,  0.22], col: [0.96, 0.98, 1.00], int: 5.0 },
+    l1: { dir: [-0.55,  0.36, -0.55], col: [0.50, 0.60, 0.85], int: 0.9 },
+    amb: 0.48, exp: 1.00, beam: 0.022, sky: [0.66, 0.70, 0.78]
+  }
+];
+
+const state = {
+  simTime: 0,
+  preset: 0,
+  cur: JSON.parse(JSON.stringify(PRESETS[0])),
+  target: PRESETS[0],
+  userYaw: 0, userPitch: 0,
+  dragging: false, dragMode: 'orbit',
+  lastX: 0, lastY: 0,
+  radius: 1.95, radiusTarget: 1.95,
+  lightYaw: 0, lightPitch: 0, lightTargetYaw: 0, lightTargetPitch: 0,
+  lightMode: false,
+  paused: false
+};
+
+/* Render quality ladder (stepped down automatically on slow GPUs). */
+const QSTEPS = [
+  { ss: 1, disp: 1, scale: 1.00, rows: 512 },
+  { ss: 1, disp: 0, scale: 1.00, rows: 512 },
+  { ss: 0, disp: 0, scale: 1.00, rows: 320 },
+  { ss: 0, disp: 0, scale: 0.85, rows: 256 },
+  { ss: 0, disp: 0, scale: 0.72, rows: 160 },
+  { ss: 0, disp: 0, scale: 0.60, rows: 128 }
+];
+const MAXPIX = 2.3e6;
+const quality = {
+  idx: 0, locked: false, warm: 1.6, buf: [], cnt: 0,
+  lastChange: -1e9, lastDir: 0, banned: {}
+};
+function setStep(i){
+  if (i === quality.idx || i < 0 || i >= QSTEPS.length) return;
+  quality.idx = i;
+  quality.lastChange = performance.now();
+  quality.buf.length = 0;
+  quality.warm = 0.7;
+}
+function qualityTick(rawMs, now){
+  if (quality.locked || rawMs > 250) return;
+  if (quality.warm > 0){ quality.warm -= rawMs / 1000; return; }
+  const b = quality.buf;
+  b.push(rawMs);
+  if (b.length > 60) b.shift();
+  if (b.length < 45 || now - quality.lastChange < 1500) return;
+  quality.cnt++;
+  if (quality.cnt % 15) return;
+  const s = b.slice().sort((x, y) => x - y);
+  const base = s[4];
+  const avg = b.reduce((a, v) => a + v, 0) / b.length;
+  if (avg > 40 || avg > base * 1.45 + 1.5){
+    if (quality.idx < QSTEPS.length - 1){
+      if (quality.lastDir > 0 && now - quality.lastChange < 6000) quality.banned[quality.idx] = true;
+      quality.lastDir = -1;
+      setStep(quality.idx + 1);
+    }
+  } else if (avg < base * 1.06 + 0.4 && quality.idx > 0 && !quality.banned[quality.idx - 1]
+             && now - quality.lastChange > 8000){
+    quality.lastDir = 1;
+    setStep(quality.idx - 1);
+  }
+}
+
+function norm3(v){
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+function rotY(v, a){
+  const c = Math.cos(a), s = Math.sin(a);
+  return [c * v[0] + s * v[2], v[1], -s * v[0] + c * v[2]];
+}
+function rotX(v, a){
+  const c = Math.cos(a), s = Math.sin(a);
+  return [v[0], c * v[1] - s * v[2], s * v[1] + c * v[2]];
+}
+/* column-major mat3 = Ry(a) * Rx(b) */
+function rotMat(a, b){
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const cb = Math.cos(b), sb = Math.sin(b);
+  return [
+    ca, 0, -sa,
+    sa * sb, cb, ca * sb,
+    sa * cb, -sb, ca * cb
+  ];
+}
+
+function lightPos(baseDir, cc){
+  let d = rotX(rotY(norm3(baseDir), state.lightYaw), state.lightPitch);
+  const p = [cc[0] + d[0] * LIGHT_RADIUS,
+             cc[1] + d[1] * LIGHT_RADIUS,
+             cc[2] + d[2] * LIGHT_RADIUS];
+  /* keep the lamp inside the concrete box */
+  p[0] = Math.max(-2.6, Math.min(2.6, p[0]));
+  p[1] = Math.max(-1.35, Math.min(2.15, p[1]));
+  p[2] = Math.max(-2.6, Math.min(2.6, p[2]));
+  return p;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Interaction                                                        */
+/* ------------------------------------------------------------------ */
+
+const hintEl = document.getElementById('hint');
+const lindEl = document.getElementById('lind');
+
+function showHint(){
+  hintEl.classList.remove('off');
+  hintEl.classList.add('on');
+  clearTimeout(showHint._t);
+  showHint._t = setTimeout(() => {
+    hintEl.classList.remove('on');
+    hintEl.classList.add('off');
+  }, 4000);
+}
+showHint();
+
+let lindTimer = 0;
+function showIndicator(text, ms){
+  lindEl.textContent = text;
+  lindEl.classList.add('on');
+  clearTimeout(lindTimer);
+  lindTimer = setTimeout(() => lindEl.classList.remove('on'), ms);
+}
+function showLightIndicator(){
+  const y = Math.round(state.lightYaw * 180 / Math.PI);
+  const p = Math.round(state.lightPitch * 180 / Math.PI);
+  showIndicator('light tilt  ' + (y >= 0 ? '+' : '') + y + '\u00B0 / ' + (p >= 0 ? '+' : '') + p + '\u00B0', 900);
+}
+function showPresetIndicator(){
+  showIndicator('0' + (state.preset + 1) + '  \u00B7  ' + PRESETS[state.preset].name, 1800);
+}
+
+function setPreset(i){
+  state.preset = i;
+  state.target = PRESETS[i];
+}
+function snap(){
+  state.cur = JSON.parse(JSON.stringify(state.target));
+  state.lightYaw = state.lightTargetYaw;
+  state.lightPitch = state.lightTargetPitch;
+  state.radius = state.radiusTarget;
+  state.userYaw = 0;
+  state.userPitch = 0;
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  state.dragging = true;
+  state.lastX = e.clientX;
+  state.lastY = e.clientY;
+  state.dragMode = (e.button === 2 || e.shiftKey || state.lightMode) ? 'light' : 'orbit';
+  canvas.classList.add('drag');
+  e.preventDefault();
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!state.dragging) return;
+  const dx = e.clientX - state.lastX;
+  const dy = e.clientY - state.lastY;
+  state.lastX = e.clientX;
+  state.lastY = e.clientY;
+  if (state.dragMode === 'light'){
+    state.lightTargetYaw += dx * 0.006;
+    state.lightTargetPitch += dy * 0.006;
+    state.lightTargetYaw = Math.max(-1.1, Math.min(1.1, state.lightTargetYaw));
+    state.lightTargetPitch = Math.max(-0.9, Math.min(0.9, state.lightTargetPitch));
+    showLightIndicator();
+  } else {
+    state.userYaw   -= dx * 0.0062;
+    state.userPitch += dy * 0.0050;
+    state.userPitch = Math.max(-0.55, Math.min(0.55, state.userPitch));
+  }
+});
+function endDrag(e){
+  if (!state.dragging) return;
+  state.dragging = false;
+  canvas.classList.remove('drag');
+  if (e && e.pointerId !== undefined){
+    try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+  }
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const k = Math.exp(e.deltaY * 0.0011);
+  state.radiusTarget = Math.max(1.12, Math.min(2.30, state.radiusTarget * k));
+}, { passive: false });
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === '1' || e.code === 'Digit1'){ setPreset(0); showPresetIndicator(); }
+  else if (e.key === '2' || e.code === 'Digit2'){ setPreset(1); showPresetIndicator(); }
+  else if (e.key === '3' || e.code === 'Digit3'){ setPreset(2); showPresetIndicator(); }
+  else if (e.code === 'Space'){
+    e.preventDefault();
+    state.paused = !state.paused;
+  }
+  else if (e.key === 'l' || e.key === 'L'){
+    state.lightMode = !state.lightMode;
+    showIndicator(state.lightMode ? 'light tilt mode  \u00B7  drag = move the spotlights' : 'orbit mode', 1400);
+  }
+  else if (e.key === 'r' || e.key === 'R'){
+    state.lightTargetYaw = 0;
+    state.lightTargetPitch = 0;
+    state.lightYaw = 0;
+    state.lightPitch = 0;
+    state.userYaw = 0;
+    state.userPitch = 0;
+    state.radiusTarget = 1.95;
+    showIndicator('reset', 900);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/*  Render targets                                                     */
+/* ------------------------------------------------------------------ */
+
+/* photon table: one RGBA32F texel per light ray (1024 x 512 = 524k rays per spotlight) */
+const TW = 1024, TH = 512;
+/* caustic atlas: 3 x 2 tiles of 512 px, ~91 px per world unit */
+const AW = 1536, AH = 1024;
+const RB = 0.64, PXU = 512 / 5.6;
+
+let RW = 0, RH = 0, BW = 0, BH = 0;
+let texScene = null, texLdr = null, texBloomA = null, texBloomB = null;
+let fbScene = null, fbLdr = null, fbBloomA = null, fbBloomB = null;
+let texTable = null, fbTable = null;
+let texSplat = null, fbSplat = null, texBlur1 = null, fbBlur1 = null, texBlur2 = null, fbBlur2 = null;
+let texBlur3 = null, fbBlur3 = null;
+const texCaus = [null, null], fbCaus = [null, null];
+
+function allocTargets(){
+  for (const t of [texScene, texLdr, texBloomA, texBloomB]) if (t) gl.deleteTexture(t);
+  for (const f of [fbScene, fbLdr, fbBloomA, fbBloomB]) if (f) gl.deleteFramebuffer(f);
+  texScene  = makeTex(RW, RH, floatOK);
+  texLdr    = makeTex(RW, RH, false);
+  texBloomA = makeTex(BW, BH, floatOK);
+  texBloomB = makeTex(BW, BH, floatOK);
+  fbScene  = makeFBO(texScene);
+  fbLdr    = makeFBO(texLdr);
+  fbBloomA = makeFBO(texBloomA);
+  fbBloomB = makeFBO(texBloomB);
+}
+function allocCaustics(){
+  texTable = makeTex(TW, TH, true, gl.RGBA32F);
+  /* fetched per texel only: nearest filtering keeps the float texture complete everywhere */
+  gl.bindTexture(gl.TEXTURE_2D, texTable);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  fbTable = makeFBO(texTable);
+  texSplat = makeTex(AW, AH, true);  fbSplat = makeFBO(texSplat);
+  texBlur1 = makeTex(AW, AH, true);  fbBlur1 = makeFBO(texBlur1);
+  texBlur2 = makeTex(AW, AH, true);  fbBlur2 = makeFBO(texBlur2);
+  texBlur3 = makeTex(AW, AH, true);  fbBlur3 = makeFBO(texBlur3);
+  for (let i = 0; i < 2; i++){
+    texCaus[i] = makeTex(AW, AH, true);
+    fbCaus[i] = makeFBO(texCaus[i]);
+  }
+}
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+  const ch = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+  if (canvas.width !== cw || canvas.height !== ch){
+    canvas.width = cw;
+    canvas.height = ch;
+  }
+  const base = Math.min(1, Math.sqrt(MAXPIX / (cw * ch)));
+  const sc = base * QSTEPS[quality.idx].scale;
+  const w = Math.max(64, Math.round(cw * sc));
+  const h = Math.max(64, Math.round(ch * sc));
+  if (w !== RW || h !== RH){
+    RW = w; RH = h;
+    BW = Math.max(32, w >> 1); BH = Math.max(32, h >> 1);
+    allocTargets();
+  }
+}
+window.addEventListener('resize', resize);
+
+/* ------------------------------------------------------------------ */
+/*  Caustic photon mapping                                             */
+/* ------------------------------------------------------------------ */
+
+function mapCaustics(i, lp, li, cc, rot, hueAxis, phase, rows){
+  const axis = norm3([cc[0] - lp[0], cc[1] - lp[1], cc[2] - lp[2]]);
+  const dist = Math.hypot(cc[0] - lp[0], cc[1] - lp[1], cc[2] - lp[2]);
+  let tbU = [axis[2], 0, -axis[0]];
+  if (Math.hypot(tbU[0], tbU[1], tbU[2]) < 1e-4) tbU = [1, 0, 0];
+  tbU = norm3(tbU);
+  const tbW = [axis[1] * tbU[2] - axis[2] * tbU[1], axis[2] * tbU[0] - axis[0] * tbU[2], axis[0] * tbU[1] - axis[1] * tbU[0]];
+  /* each photon carries an equal share of the power that hits the crystal */
+  const weight = li.int / (1 + 0.05 * dist * dist) * Math.PI * RB * RB / (TW * rows) * PXU * PXU;
+
+  /* 1. trace one light ray per texel */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbTable);
+  gl.viewport(0, 0, TW, rows);
+  gl.useProgram(progPhoton);
+  gl.uniform3f(U(progPhoton, 'uLPos'), lp[0], lp[1], lp[2]);
+  gl.uniform3fv(U(progPhoton, 'uAxis'), axis);
+  gl.uniform3fv(U(progPhoton, 'uU'), tbU);
+  gl.uniform3fv(U(progPhoton, 'uW'), tbW);
+  gl.uniform1f(U(progPhoton, 'uTanR'), RB / dist);
+  gl.uniform2f(U(progPhoton, 'uTableSize'), TW, rows);
+  gl.uniform1f(U(progPhoton, 'uWeight'), weight);
+  gl.uniform1f(U(progPhoton, 'uPhase'), phase);
+  gl.uniformMatrix3fv(U(progPhoton, 'uRot'), false, rot);
+  gl.uniform3fv(U(progPhoton, 'uCC'), cc);
+  gl.uniform3fv(U(progPhoton, 'uHueAxis'), hueAxis);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  /* 2. splat the landing points into the atlas */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbSplat);
+  gl.viewport(0, 0, AW, AH);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(progSplat);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texTable);
+  gl.uniform1i(U(progSplat, 'uTable'), 0);
+  gl.uniform2f(U(progSplat, 'uTableSize'), TW, rows);
+  gl.uniform3fv(U(progSplat, 'uLCol'), li.col);
+  gl.uniformMatrix3fv(U(progSplat, 'uRot'), false, rot);
+  gl.uniform3fv(U(progSplat, 'uCC'), cc);
+  gl.uniform3fv(U(progSplat, 'uHueAxis'), hueAxis);
+  gl.drawArrays(gl.POINTS, 0, TW * rows);
+  gl.disable(gl.BLEND);
+
+  /* 3. three smoothing scales, then blend per texel by photon density */
+  gl.useProgram(progABlur);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.uniform1i(U(progABlur, 'uTex'), 0);
+  const pass = (src, dst, dx, dy) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst);
+    gl.viewport(0, 0, AW, AH);
+    gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.uniform2f(U(progABlur, 'uDir'), dx / AW, dy / AH);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  pass(texSplat, fbBlur1, 1.0, 0.0);
+  pass(texBlur1, fbBlur2, 0.0, 1.0);     /* texBlur2 = sharp */
+  pass(texBlur2, fbBlur1, 2.0, 0.0);
+  pass(texBlur1, fbSplat, 0.0, 2.0);     /* texSplat = mid   */
+  pass(texSplat, fbBlur1, 4.5, 0.0);
+  pass(texBlur1, fbBlur3, 0.0, 4.5);     /* texBlur3 = wide  */
+  gl.useProgram(progAComb);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbCaus[i]);
+  gl.viewport(0, 0, AW, AH);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texBlur2);
+  gl.uniform1i(U(progAComb, 'uSharp'), 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, texSplat);
+  gl.uniform1i(U(progAComb, 'uMid'), 1);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, texBlur3);
+  gl.uniform1i(U(progAComb, 'uWide'), 2);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Render loop                                                        */
+/* ------------------------------------------------------------------ */
+
+let prev = performance.now();
+let frames = 0, fpsTime = 0, fps = 60;
+let causKey = '';
+const FOCAL = 0.95;
+
+function render(now){
+  const rawMs = now - prev;
+  const dt = Math.min(0.05, Math.max(0.0001, rawMs / 1000));
+  prev = now;
+
+  frames++; fpsTime += dt;
+  if (fpsTime >= 0.5){ fps = frames / fpsTime; frames = 0; fpsTime = 0; }
+
+  qualityTick(rawMs, now);
+
+  if (!state.paused) state.simTime += dt;
+
+  /* ease light preset */
+  const k = 1 - Math.exp(-dt * 5.0);
+  const c = state.cur, t = state.target;
+  for (const key of ['l0', 'l1']){
+    for (let j = 0; j < 3; j++){
+      c[key].col[j] += (t[key].col[j] - c[key].col[j]) * k;
+      c[key].dir[j] += (t[key].dir[j] - c[key].dir[j]) * k;
+    }
+    c[key].int += (t[key].int - c[key].int) * k;
+  }
+  c.amb  += (t.amb  - c.amb)  * k;
+  c.exp  += (t.exp  - c.exp)  * k;
+  c.beam += (t.beam - c.beam) * k;
+  for (let j = 0; j < 3; j++) c.sky[j] += (t.sky[j] - c.sky[j]) * k;
+
+  /* ease camera + light tilt */
+  state.radius += (state.radiusTarget - state.radius) * (1 - Math.exp(-dt * 8.0));
+  if (!state.dragging || state.dragMode !== 'orbit'){
+    const decay = Math.exp(-dt * 1.5);
+    state.userYaw *= decay;
+    state.userPitch *= decay;
+  }
+  state.lightYaw += (state.lightTargetYaw - state.lightYaw) * (1 - Math.exp(-dt * 12.0));
+  state.lightPitch += (state.lightTargetPitch - state.lightPitch) * (1 - Math.exp(-dt * 12.0));
+
+  resize();
+
+  const T = state.simTime;
+  const cc = [0.0, CENTER_Y + 0.025 * Math.sin(T * 0.9), 0.0];   /* levitation bob */
+  const yawAuto = T * (Math.PI * 2 / 30.0);                       /* 30 s orbit */
+  /* 17 deg above the horizon: keeps the floor and its caustic pool in frame */
+  const pitchAuto = 0.30 + 0.07 * Math.sin(T * 0.21);
+  const yaw = yawAuto + state.userYaw;
+  const pitch = Math.max(-0.6, Math.min(0.7, pitchAuto + state.userPitch));
+  const R = state.radius;
+
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const camPos = [
+    cc[0] + R * cp * Math.sin(yaw),
+    cc[1] + R * sp,
+    cc[2] + R * cp * Math.cos(yaw)
+  ];
+  let fwd = [cc[0] - camPos[0], cc[1] - camPos[1], cc[2] - camPos[2]];
+  fwd = norm3(fwd);
+  /* right = fwd x worldUp, up = right x fwd (keeps the floor at the bottom of the frame) */
+  let right = [-fwd[2], 0, fwd[0]];
+  const rl = Math.hypot(right[0], right[1], right[2]) || 1;
+  right = [right[0] / rl, right[1] / rl, right[2] / rl];
+  const up = [
+    right[1] * fwd[2] - right[2] * fwd[1],
+    right[2] * fwd[0] - right[0] * fwd[2],
+    right[0] * fwd[1] - right[1] * fwd[0]
+  ];
+
+  const rot = rotMat(T * 0.23, T * 0.145);
+  const rot2 = rotMat(-T * 0.37, T * 0.21);
+  const phase = T * 0.35;
+  const hueAxis = norm3([Math.cos(T * 0.11), 0.45, Math.sin(T * 0.11)]);
+  const q = QSTEPS[quality.idx];
+
+  const lp0 = lightPos(c.l0.dir, cc);
+  const lp1 = lightPos(c.l1.dir, cc);
+
+  /* ---------------- caustics: photon mapping, one map per spotlight ----------------
+     recomputed only when the crystal or a lamp actually moved (e.g. not while paused) */
+  if (floatOK){
+    const key = q.rows + '|' + T.toFixed(4) + '|' + c.l0.int.toFixed(4) + '|' + c.l1.int.toFixed(4)
+              + '|' + lp0.concat(lp1).map(v => v.toFixed(4)).join(',');
+    if (key !== causKey){
+      causKey = key;
+      mapCaustics(0, lp0, c.l0, cc, rot, hueAxis, phase, q.rows);
+      mapCaustics(1, lp1, c.l1, cc, rot, hueAxis, phase, q.rows);
+    }
+  }
+
+  /* ---------------- pass 1: scene (native resolution) ---------------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbScene);
+  gl.viewport(0, 0, RW, RH);
+  gl.useProgram(progScene);
+  gl.uniform2f(U(progScene, 'uRes'), RW, RH);
+  gl.uniform3f(U(progScene, 'uCamPos'), camPos[0], camPos[1], camPos[2]);
+  gl.uniform3f(U(progScene, 'uCamFwd'), fwd[0], fwd[1], fwd[2]);
+  gl.uniform3f(U(progScene, 'uCamRight'), right[0], right[1], right[2]);
+  gl.uniform3f(U(progScene, 'uCamUp'), up[0], up[1], up[2]);
+  gl.uniform1f(U(progScene, 'uFocal'), FOCAL);
+  gl.uniform3fv(U(progScene, 'uLPos[0]'), [lp0[0], lp0[1], lp0[2], lp1[0], lp1[1], lp1[2]]);
+  gl.uniform3fv(U(progScene, 'uLCol[0]'), [c.l0.col[0], c.l0.col[1], c.l0.col[2], c.l1.col[0], c.l1.col[1], c.l1.col[2]]);
+  gl.uniform1fv(U(progScene, 'uLInt[0]'), [c.l0.int, c.l1.int]);
+  gl.uniformMatrix3fv(U(progScene, 'uRot'), false, rot);
+  gl.uniformMatrix3fv(U(progScene, 'uRot2'), false, rot2);
+  gl.uniform3fv(U(progScene, 'uCC'), cc);
+  gl.uniform3fv(U(progScene, 'uHueAxis'), hueAxis);
+  gl.uniform3fv(U(progScene, 'uSky'), c.sky);
+  gl.uniform1f(U(progScene, 'uPhase'), phase);
+  gl.uniform1f(U(progScene, 'uAmb'), c.amb);
+  gl.uniform1f(U(progScene, 'uSS'), q.ss);
+  gl.uniform1f(U(progScene, 'uDisp'), q.disp);
+  gl.uniform1f(U(progScene, 'uBeam'), c.beam);
+  gl.uniform1f(U(progScene, 'uFloorRef'), 0.30);
+  gl.uniform1f(U(progScene, 'uCaustic'), floatOK ? 2.2 : 0.0);
+  gl.uniform1f(U(progScene, 'uInline'), floatOK ? 0 : 1);
+  gl.uniform1f(U(progScene, 'uExposure'), c.exp);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, texCaus[0]);
+  gl.uniform1i(U(progScene, 'uCaus0'), 2);
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, texCaus[1]);
+  gl.uniform1i(U(progScene, 'uCaus1'), 3);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  const ldrTex = floatOK ? texLdr : texScene;
+
+  if (floatOK){
+    /* ---------------- pass 2: bright ---------------- */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbBloomA);
+    gl.viewport(0, 0, BW, BH);
+    gl.useProgram(progBright);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texScene);
+    gl.uniform1i(U(progBright, 'uTex'), 0);
+    gl.uniform1f(U(progBright, 'uThresh'), 1.2);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    /* ---------------- passes 3-8: blur ---------------- */
+    gl.useProgram(progBlur);
+    gl.uniform1i(U(progBlur, 'uTex'), 0);
+    const blurPass = (src, dst, dx, dy) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst);
+      gl.viewport(0, 0, BW, BH);
+      gl.bindTexture(gl.TEXTURE_2D, src);
+      gl.uniform2f(U(progBlur, 'uDir'), dx / BW, dy / BH);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    blurPass(texBloomA, fbBloomB, 1.0, 0.0);
+    blurPass(texBloomB, fbBloomA, 0.0, 1.0);
+    blurPass(texBloomA, fbBloomB, 2.2, 0.0);
+    blurPass(texBloomB, fbBloomA, 0.0, 2.2);
+    blurPass(texBloomA, fbBloomB, 5.0, 0.0);
+    blurPass(texBloomB, fbBloomA, 0.0, 5.0);
+
+    /* ---------------- pass 9: composite / tonemap ---------------- */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbLdr);
+    gl.viewport(0, 0, RW, RH);
+    gl.useProgram(progComp);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texScene);
+    gl.uniform1i(U(progComp, 'uScene'), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texBloomA);
+    gl.uniform1i(U(progComp, 'uBloom'), 1);
+    gl.uniform1f(U(progComp, 'uExposure'), c.exp);
+    gl.uniform1f(U(progComp, 'uBloomAmt'), 0.34);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /* ---------------- pass 10: to the screen ---------------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, ldrTex);
+  const native = (RW === canvas.width && RH === canvas.height);
+  if (native){
+    gl.useProgram(progFxaa);
+    gl.uniform1i(U(progFxaa, 'uTex'), 0);
+    gl.uniform2f(U(progFxaa, 'uTexel'), 1 / RW, 1 / RH);
+  } else {
+    gl.useProgram(progUp);
+    gl.uniform1i(U(progUp, 'uTex'), 0);
+    gl.uniform2f(U(progUp, 'uTexel'), 1 / RW, 1 / RH);
+  }
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  requestAnimationFrame(render);
+}
+
+/* tiny debug hook (harmless, no console noise) */
+window.__dichroic = {
+  state,
+  fps: () => fps,
+  preset: (i) => { setPreset(i); snap(); },
+  time: (t) => { state.simTime = t; },
+  pause: (v) => { state.paused = !!v; }
+};
+
+if (floatOK) allocCaustics();
+resize();
+requestAnimationFrame((t) => { prev = t; render(t); });
+</script>
+</body>
+</html>
