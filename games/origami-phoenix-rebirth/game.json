@@ -1,0 +1,18 @@
+{
+  "slug": "origami-phoenix-rebirth",
+  "title": "The Origami Phoenix",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js origami sculpture where a calligraphed crimson sheet folds itself into a gilded phoenix taking flight over a shrine.",
+  "description": "Burning Fold Rebirth is a 30-second interactive Three.js sculpture and short film. A calligraphed crimson paper sheet lifts along diagonal creases, fans out gilded tail feathers, takes flight over a lantern-lit shrine, and settles gently back onto its basalt altar.",
+  "accent": "#e05344",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Origami",
+    "Sculpture",
+    "Animation"
+  ],
+  "cover": "cover.webp"
+}

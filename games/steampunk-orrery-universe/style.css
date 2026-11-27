@@ -1,0 +1,32 @@
+:root{color-scheme:dark;--ink:#ece1c9;--brass:#d4b176;--rule:rgba(195,160,99,.42)}
+*{box-sizing:border-box}
+body{margin:0;background:#11191c;color:var(--ink);font-family:Georgia,'Times New Roman',serif;overflow:hidden}
+#observatory{display:block;width:100vw;height:100dvh;touch-action:none}
+#interface{position:fixed;inset:0;pointer-events:none;background:linear-gradient(135deg,rgba(4,14,19,.6),transparent 27%),linear-gradient(8deg,rgba(5,14,17,.55),transparent 16%)}
+header{position:absolute;left:2.8vw;top:4.3vh;display:flex;gap:13px;align-items:center;text-shadow:0 2px 14px #0a1013}
+.seal{width:64px;height:64px;color:var(--brass);filter:drop-shadow(0 2px 4px #18150f)}
+.eyebrow,legend,output,.duration,#time{font:10px/1.4 'Courier New',monospace;letter-spacing:.13em;text-transform:uppercase}
+header .eyebrow{font-size:11px;letter-spacing:.23em;color:#ead3a5}h1{font-weight:400;font-size:clamp(29px,2.9vw,50px);line-height:.98;margin:1px 0 3px;letter-spacing:-.028em}
+header p{margin:0;font-size:15px;letter-spacing:.05em;font-style:italic;color:#dfc79b}
+#controls{position:absolute;right:2.8vw;top:4.3vh;width:217px;background:linear-gradient(125deg,rgba(21,35,38,.94),rgba(14,25,29,.92));border:1px solid var(--rule);box-shadow:0 5px 25px #050a0c55;pointer-events:auto}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid #fde3ac;outline-offset:3px}
+#panel-toggle{display:flex;align-items:center;width:100%;padding:11px 12px;gap:8px;border:0;background:transparent;text-align:left;font-size:15px;letter-spacing:.01em}
+.symbol,#fold{color:var(--brass);font-family:Georgia,serif}.symbol{font-size:18px;line-height:12px}#fold{margin-left:auto}
+#instruments{margin:0 13px 12px;border-top:1px solid var(--rule);padding-top:12px}
+#instruments[hidden]{display:none}
+label{display:flex;align-items:center;justify-content:space-between;font-size:13px}output,.duration,#time{color:#dec18e;font-size:10px;letter-spacing:.05em}
+input[type=range]{width:100%;margin:3px 0 10px;height:11px;appearance:none;background:transparent;cursor:pointer;display:block}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:linear-gradient(to right,#cfad70 var(--pct),#6c6c5c var(--pct))}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:8px;height:8px;transform:rotate(45deg);margin-top:-3px;border:1px solid #efd39e;background:#c6a263}
+input[type=range]::-moz-range-track{height:2px;background:#88806a}input[type=range]::-moz-range-thumb{height:8px;width:8px;background:#d5b675}
+fieldset{border:0;margin:1px 0 11px;padding:0}legend{font-size:9px;color:#c3b89a;letter-spacing:.11em;margin:0 0 5px;padding:0}
+.presets{display:flex;gap:3px}.presets button{padding:5px 3px;font-size:11px;flex:auto;border:1px solid #695f46;background:#182a2e}.presets button.chosen,.presets button:hover{background:#695d42;color:#ffedc4;border-color:#b39b6c}
+#show{display:flex;align-items:center;gap:8px;background:#223437;border:1px solid var(--rule);width:100%;padding:7px 8px;font-size:13px;text-align:left}
+#show:hover{background:#364649}#play{color:var(--brass);font:16px/1 Georgia}.duration{margin-left:auto}
+footer{position:absolute;bottom:4.3vh;left:2.8vw;display:flex;align-items:center;gap:12px;text-shadow:0 2px 7px #000}
+#chapter-index{display:grid;place-items:center;border:1px solid var(--rule);width:33px;height:33px;color:#e1be7e;background:#14202370;font:italic 17px Georgia}
+footer .eyebrow{font-size:9px;color:#d6bc8b;letter-spacing:.18em}#chapter-name{font:italic 19px Georgia;margin-top:2px}#time{margin-left:4px}
+#loading{position:fixed;inset:0;background:#132326;display:grid;place-content:center;font:italic 23px Georgia;color:var(--brass)}
+body.film #interface, #loading[hidden]{display:none}
+@media(max-width:660px){header{left:12px;top:13px;gap:6px}.seal{width:38px;height:38px}h1{font-size:23px}header .eyebrow{font-size:8px}header p{font-size:11px}#controls{top:auto;bottom:12px;right:12px;width:185px}footer{left:12px;bottom:15px;gap:6px}#chapter-name{font-size:15px}#chapter-index{display:none}#time{display:none}}

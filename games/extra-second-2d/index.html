@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#172d34" />
+    <title>The Extra Second · Лишняя секунда</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <main aria-label="The Extra Second, an animated short">
+      <canvas
+        id="film"
+        width="1920"
+        height="1080"
+        aria-label="An old sweeper catches a child's runaway balloon during a stolen second at Bellwick station."
+      ></canvas>
+      <footer id="controls" class="hud">
+        <div class="credit">
+          <h1>The Extra Second</h1>
+          <span lang="ru">Лишняя секунда</span>
+        </div>
+        <div class="transport">
+          <button id="play" aria-label="Pause film" title="Play or pause (Space)">
+            <span id="play-icon">Ⅱ</span>
+          </button>
+          <label class="time" for="timeline"
+            ><span id="elapsed">00:00</span><span class="divider">/</span>00:45</label
+          >
+          <input
+            id="timeline"
+            type="range"
+            min="0"
+            max="44.999"
+            step=".001"
+            value="0"
+            aria-label="Film timeline in seconds"
+          />
+          <button id="hide" title="Hide controls (H)" aria-label="Hide controls (H)">H</button>
+        </div>
+      </footer>
+    </main>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

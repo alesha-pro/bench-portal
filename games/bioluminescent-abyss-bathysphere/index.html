@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#071316" />
+    <title>Bioluminescent Abyss &amp; Bathysphere · Hadal Observatory</title>
+    <link rel="icon" type="image/svg+xml" href="assets/mark.svg" />
+    <link rel="stylesheet" href="src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <symbol id="i-sound" viewBox="0 0 24 24">
+          <path d="M3 10h4l5-4v12l-5-4H3z M16 9q3 3 0 6m3-9q6 6 0 12" />
+        </symbol>
+        <symbol id="i-mute" viewBox="0 0 24 24">
+          <path d="M3 10h4l5-4v12l-5-4H3z M17 10l5 5m0-5-5 5" />
+        </symbol>
+        <symbol id="i-expand" viewBox="0 0 24 24">
+          <path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5" />
+        </symbol>
+        <symbol id="i-sonar" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M12 12l5-6M16 13a4.2 4.2 0 1 1-5-5" />
+          <circle cx="12" cy="12" r="1" />
+        </symbol>
+        <symbol id="i-tune" viewBox="0 0 24 24">
+          <path d="M3 7h6m4 0h8M3 17h11m4 0h3" />
+          <circle cx="11" cy="7" r="2.1" />
+          <circle cx="16" cy="17" r="2.1" />
+        </symbol>
+        <symbol id="i-camera" viewBox="0 0 24 24">
+          <path d="M4 7h4l2-3h5l2 3h3v12H4z" />
+          <circle cx="12" cy="12.5" r="3.5" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24">
+          <path fill="currentColor" stroke="none" d="m8 5 11 7-11 7z" />
+        </symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12m6-12v12" stroke-width="3" /></symbol>
+        <symbol id="i-drag" viewBox="0 0 24 24">
+          <path d="M6 12h12m-3-3 3 3-3 3M9 9l-3 3 3 3" />
+          <ellipse cx="12" cy="12" rx="10" ry="5.5" transform="rotate(-25 12 12)" />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+      </defs>
+    </svg>
+    <main>
+      <canvas
+        id="ocean"
+        aria-label="Interactive bathysphere, siphonophore colony and volcanic trench"
+      ></canvas>
+      <header class="chrome topbar">
+        <div class="brand"><img src="assets/mark.svg" alt="" /><span>Hadal Observatory</span></div>
+        <span class="header-section">Expedition archive</span>
+        <div class="head-right">
+          <span class="live"><i></i> Live feed</span><span class="head-sep"></span>
+          <button
+            id="sound"
+            aria-label="Enable hydrophone audio"
+            title="Hydrophone audio"
+            aria-pressed="false"
+          >
+            <svg><use href="#i-mute" /></svg><span>Hydrophone</span>
+          </button>
+          <button id="fullscreen" class="icon-only" aria-label="Enter fullscreen" title="Fullscreen">
+            <svg><use href="#i-expand" /></svg>
+          </button>
+        </div>
+      </header>
+      <div class="chrome stage-hud">
+        <div class="topdata">
+          <span class="cross">+</span> <span>BATHYSPHERE IV</span><b></b><span id="feed">EXT. CAM</span>
+        </div>
+        <div class="depth">
+          <span class="ruler"></span><span>DEPTH <strong id="depth">4,000</strong> m</span>
+        </div>
+        <div class="lower">
+          <div class="scene-title">
+            <div class="eyebrow"><i></i> DIVE LOG <span>/</span> 004</div>
+            <h1>Bioluminescent <em>Abyss</em></h1>
+            <p>Bathysphere descent <span>·</span> Hydrothermal trench</p>
+          </div>
+          <div class="scene-chapter">
+            <span class="chapter-line"></span><span id="chapter-index">01 / 04</span
+            ><strong id="chapter">The descent</strong>
+          </div>
+        </div>
+      </div>
+      <footer class="chrome controls">
+        <div class="transport">
+          <button
+            id="auto"
+            aria-label="Auto Showcase (30s)"
+            aria-pressed="false"
+            title="Play or pause the 30-second showcase"
+          >
+            <span class="play-disc"
+              ><svg><use href="#i-play" /></svg></span
+            ><span>Auto showcase</span>
+          </button>
+          <div class="time">
+            <span id="tc">00:00</span><span class="duration"> / 00:30</span
+            ><input
+              id="timeline"
+              type="range"
+              min="0"
+              max="29.99"
+              step=".01"
+              value="0"
+              aria-label="Showcase time"
+            />
+          </div>
+        </div>
+        <div class="orbit-hint">
+          <svg><use href="#i-drag" /></svg>Drag to orbit
+        </div>
+        <div class="actions">
+          <label class="camera"
+            ><svg><use href="#i-camera" /></svg
+            ><select id="view" aria-label="Camera view">
+              <option value="ext">Exterior Abyss</option>
+              <option value="int">Inside Viewport</option></select
+            ><svg class="down"><use href="#i-chevron" /></svg
+          ></label>
+          <button class="ping" id="ping">
+            <svg><use href="#i-sonar" /></svg><span>Sonar ping</span>
+          </button>
+          <button class="settings" id="settings" aria-controls="panel" aria-expanded="false">
+            <svg><use href="#i-tune" /></svg><span>Instruments</span>
+          </button>
+        </div>
+      </footer>
+      <section class="chrome panel" id="panel" hidden aria-label="Dive instruments">
+        <div class="panel-title">
+          <h2>Dive instruments</h2>
+          <button id="close-panel" class="icon-only" aria-label="Close instruments">
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <label for="angle">Floodlight angle <output id="a-out">28°</output></label
+        ><input id="angle" type="range" min="-40" max="95" value="28" />
+        <label for="intensity">Floodlight intensity <output id="i-out">100%</output></label
+        ><input id="intensity" type="range" min="0" max="180" value="100" />
+        <label for="pulse">Bioluminescence pulse <output id="p-out">100%</output></label
+        ><input id="pulse" type="range" min="0" max="190" value="100" />
+      </section>
+      <div id="status" role="status"></div>
+    </main>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

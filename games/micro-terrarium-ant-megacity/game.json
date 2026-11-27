@@ -1,0 +1,18 @@
+{
+  "slug": "micro-terrarium-ant-megacity",
+  "title": "The Glass Formicarium",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js brass-framed glass formicarium cutaway revealing living ant tunnels, seed vaults, fungal gardens, and the queen’s nursery.",
+  "description": "An interactive Three.js natural-history diorama and 30-second macro film. A brass-framed glass cabinet on a naturalist's oak table exposes a living cross-section of soil, dew-covered canopy, seed vaults, fungal gardens, and busy leafcutter ants tending the queen's nursery.",
+  "accent": "#6ec287",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Diorama",
+    "Nature",
+    "Macro"
+  ],
+  "cover": "cover.webp"
+}

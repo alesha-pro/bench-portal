@@ -1,0 +1,18 @@
+{
+  "slug": "cyberpunk-ramen-rain-arcade",
+  "title": "Neon Alley Ramen & Monorail Rain",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A Three.js rain-soaked midnight ramen stall with a chrome robotic cook, steam, wet asphalt reflections, and passing elevated monorails.",
+  "description": "A Three.js / WebGL2 midnight street-food stall and 30-second short film. A chrome cook lifts noodles from a bubbling stockpot while elevated trains cross a rain-soaked shopping alley illuminated by paper lanterns, neon signage, and a glowing vending machine.",
+  "accent": "#f26945",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Cyberpunk",
+    "Rain",
+    "Reflections"
+  ],
+  "cover": "cover.webp"
+}

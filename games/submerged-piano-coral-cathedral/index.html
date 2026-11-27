@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#0b191b" />
+    <title>The Sunken Grand Piano in the Cenote Cathedral</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="cenote" aria-label="Interactive underwater grand piano in a limestone cavern"></canvas>
+    <svg width="0" height="0" class="defs" aria-hidden="true">
+      <defs>
+        <symbol id="shell" viewBox="0 0 40 40">
+          <g
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M19.9 33.2 4.3 21.7l.4-6.3 4.7-4.1 1.5-4.2 6.2-1.8L20 3.6l3 1.7 6.1 1.8 1.5 4.2 4.7 4.1.4 6.3L20 33.2Zm-4.8 2h9.8"
+            />
+            <path
+              d="m20 32-15.1-16m15.1 16L9.4 11.3M20 32 11 7.4M20 32l-3-26.6M20 32V4m0 28 3-26.6M20 32l9-24.6M20 32l10.6-20.7M20 32l15.1-16"
+            />
+          </g>
+        </symbol>
+        <symbol id="soundIcon" viewBox="0 0 24 24">
+          <path d="M3 10h4l5-4v12l-5-4H3Zm12-1c1.8 1.9 1.8 4.1 0 6m3-9c3.3 3.3 3.3 8.7 0 12" />
+        </symbol>
+        <symbol id="muteIcon" viewBox="0 0 24 24">
+          <path d="M3 10h4l5-4v12l-5-4H3Zm13-1 5 6m0-6-5 6" />
+        </symbol>
+        <symbol id="rippleIcon" viewBox="0 0 24 24">
+          <path
+            d="M12 3c-1 1.6-3.2 4-3.2 6a3.2 3.2 0 0 0 6.4 0c0-2-2.2-4.4-3.2-6ZM7 13c-1.8.6-2.8 1.5-2.8 2.4 0 1.8 3.5 3.2 7.8 3.2s7.8-1.4 7.8-3.2c0-1-1-1.8-2.8-2.4"
+          />
+        </symbol>
+        <symbol id="orbitIcon" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-28 12 12)" />
+          <circle cx="12" cy="12" r="5.6" />
+        </symbol>
+      </defs>
+    </svg>
+    <div id="interface">
+      <header>
+        <div class="brand">
+          <svg aria-hidden="true"><use href="#shell" /></svg><span>Pelagic Archive</span>
+        </div>
+        <div class="headActions">
+          <button id="mobilePanel" aria-controls="panel" aria-expanded="false">Controls</button
+          ><button id="sound" aria-pressed="false">
+            <svg class="icon"><use href="#muteIcon" /></svg><span>Sound off</span>
+          </button>
+        </div>
+      </header>
+      <aside id="panel">
+        <div class="intro">
+          <div class="eyebrow"><i></i> UNDERWATER ÉTUDE</div>
+          <h1>The Sunken<br /><em>Grand Piano</em></h1>
+          <p class="subtitle">in the Cenote Cathedral</p>
+        </div>
+        <section class="views">
+          <h2>Camera presets</h2>
+          <div class="cameraList">
+            <button data-view="0" aria-pressed="true">
+              <span class="thumb t0"></span><span>Cathedral Cenote Wide</span><b></b>
+            </button>
+            <button data-view="1" aria-pressed="false">
+              <span class="thumb t1"></span><span>Keys &amp; Bubbles Macro</span><b></b>
+            </button>
+            <button data-view="2" aria-pressed="false">
+              <span class="thumb t2"></span><span>Soundboard Fish</span><b></b>
+            </button>
+          </div>
+        </section>
+        <section class="waterControls">
+          <h2>Water &amp; light</h2>
+          <label for="beam">Sunbeams &amp; caustics <output id="beamVal">72%</output></label
+          ><input
+            type="range"
+            id="beam"
+            min="0"
+            max="100"
+            value="72"
+            aria-label="Sunbeam and Caustic Intensity"
+          />
+          <label for="depth">Water clarity <output id="depthVal">68%</output></label
+          ><input
+            type="range"
+            id="depth"
+            min="0"
+            max="100"
+            value="68"
+            aria-label="Water Clarity and Depth Tint"
+          />
+        </section>
+        <section class="perform">
+          <h2>Performance</h2>
+          <button id="sonata" class="switchrow" role="switch" aria-checked="true">
+            <span>Self-Play Sonata</span><i class="switch"></i>
+          </button>
+          <button id="auto" class="switchrow" role="switch" aria-checked="true">
+            <span>Auto Showcase <small>(30s)</small></span
+            ><i class="switch"></i>
+          </button>
+          <button id="chord">
+            <svg class="icon"><use href="#rippleIcon" /></svg>Play random chord<span class="chordRipple"
+              >↗</span
+            >
+          </button>
+        </section>
+      </aside>
+      <main aria-label="Showcase">
+        <div class="stageTop"><span class="liveDot"></span> <span id="viewMode">AUTO SHOWCASE</span></div>
+        <div class="orbitHint">
+          <svg class="icon"><use href="#orbitIcon" /></svg>Drag to orbit <b>·</b> Scroll to zoom
+        </div>
+        <div class="transport">
+          <div class="movement">
+            <span id="roman">I</span><i></i><strong id="movement">The Flooded Nave</strong>
+          </div>
+          <div class="timeline">
+            <button id="pause" aria-label="Pause playback">Ⅱ</button><span id="elapsed">00:00</span
+            ><input
+              id="seek"
+              type="range"
+              min="0"
+              max="30"
+              step=".01"
+              value="0"
+              aria-label="Showcase time"
+            /><span>00:30</span>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div id="loading">
+      <svg><use href="#shell" /></svg><span>Entering the cenote…</span>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

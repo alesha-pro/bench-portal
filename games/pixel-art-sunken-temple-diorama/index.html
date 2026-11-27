@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Jungle Cenote Temple · Canopy Atlas</title>
+    <meta name="theme-color" content="#f6f3e8" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="top-inner">
+        <div class="brand">
+          <canvas id="mark" width="32" height="32" aria-hidden="true"></canvas>Canopy Atlas
+        </div>
+        <nav aria-label="Viewer">
+          <button class="nav-link active" id="explorer" aria-current="page">Diorama</button
+          ><button class="nav-link" id="film">Film room <i data-icon="film"></i></button>
+        </nav>
+        <button class="sound" id="sound" aria-pressed="false">
+          <i data-icon="volumeOff"></i><span>Sound off</span>
+        </button>
+      </div>
+    </header>
+    <main>
+      <div class="intro">
+        <div class="eyebrow"><span class="rule"></span> Interactive diorama</div>
+        <h1>Jungle Cenote <em>Temple</em></h1>
+        <p>Crisp HD-2D Pixel Art</p>
+      </div>
+      <div class="workspace">
+        <section class="viewer" aria-label="Interactive temple">
+          <div class="housing" id="housing">
+            <div id="viewport">
+              <canvas
+                id="world"
+                tabindex="0"
+                aria-label="Three-dimensional jungle temple. Drag to orbit, scroll to zoom."
+              ></canvas>
+              <div class="live"><span></span> Live view</div>
+              <button class="expand" id="full" aria-label="Enter fullscreen" title="Fullscreen">
+                <i data-icon="expand"></i>
+              </button>
+            </div>
+            <div class="transport">
+              <button id="play" aria-label="Pause auto showcase" aria-pressed="true">
+                <i data-icon="pause"></i>
+              </button>
+              <div class="showcase-label">Auto showcase</div>
+              <input
+                type="range"
+                aria-label="Showcase timeline"
+                min="0"
+                max="30"
+                step=".033333"
+                value="0"
+                id="timeline"
+              />
+              <span id="time">00:00 <b>/</b> 00:30</span>
+              <button id="reset" class="reset" title="Reset camera" aria-label="Reset camera">
+                <i data-icon="reset"></i>
+              </button>
+            </div>
+          </div>
+          <div class="legend">
+            <span><i data-icon="orbit"></i> Drag to orbit <b>·</b> Scroll to zoom</span
+            ><span class="tech"><span class="dot"></span> WebGL 2</span>
+          </div>
+        </section>
+        <aside>
+          <h2><i data-icon="sliders"></i> Field controls</h2>
+          <fieldset class="env">
+            <legend>Time of day</legend>
+            <button class="preset" data-mode="0" aria-pressed="false">
+              <canvas width="64" height="40"></canvas><span>Emerald Dawn</span><b></b>
+            </button>
+            <button class="preset chosen" data-mode="1" aria-pressed="true">
+              <canvas width="64" height="40"></canvas><span>Golden Jungle</span><b></b>
+            </button>
+            <button class="preset" data-mode="2" aria-pressed="false">
+              <canvas width="64" height="40"></canvas><span>Torchlight Midnight Rain</span><b></b>
+            </button>
+          </fieldset>
+          <div class="setting resolution">
+            <label for="res">Pixel resolution</label>
+            <div class="select">
+              <i data-icon="grid"></i
+              ><select id="res">
+                <option value="320">320 × 180 Chunky</option>
+                <option value="480" selected>480 × 270 Crisp HD-2D</option>
+                <option value="640">640 × 360 Fine</option></select
+              ><i data-icon="down"></i>
+            </div>
+          </div>
+          <div class="setting dither">
+            <label for="bayer">Bayer dither strength</label><output for="bayer" id="amount">75%</output
+            ><input type="range" id="bayer" min="0" max="100" value="75" />
+          </div>
+          <label class="wet"
+            ><i data-icon="rain"></i><span>Rain &amp; waterfall surge</span
+            ><input id="rain" type="checkbox" role="switch" /><b aria-hidden="true"></b
+          ></label>
+        </aside>
+      </div>
+    </main>
+    <dialog id="film-dialog">
+      <div class="film-heading">
+        <h2>Jungle Cenote Temple</h2>
+        <button id="close-film" aria-label="Close film"><i data-icon="close"></i></button>
+      </div>
+      <video id="movie" controls preload="none" playsinline></video>
+    </dialog>
+    <audio id="music" preload="none" loop src="./assets/cenote.ogg"></audio>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "slug": "sunlit-vase-caustics",
+  "title": "Sunlit Apartment",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A WebGL still life of garden roses and peonies in a fluted water-filled vase with interactive sloshing caustics and raking afternoon sunlight.",
+  "description": "An interactive Three.js still life of garden roses and peonies inside a water-filled, fluted glass vase. An open casement and slatted shutters rake sunlight across walnut, a botanical book, and the panelled wall with real-time spectral caustics and HDR bloom. Drag the vase or press Nudge vase to disturb the water, drag elsewhere to orbit, scroll to zoom, and press H to toggle controls.",
+  "accent": "#dfb879",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Caustics",
+    "Optics",
+    "Still Life"
+  ],
+  "cover": "cover.webp"
+}

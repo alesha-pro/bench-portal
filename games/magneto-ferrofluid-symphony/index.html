@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#eeede8" />
+    <title>Ferrofluid Symphony — Field Instruments</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <svg viewBox="0 0 36 30" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <path
+              d="M2 23 Q9 22 11 11 T20 3M7 26 Q14 25 16 14 T25 6M12 29 Q19 28 21 17 T30 9M1 15 Q5 13 6 7 T12 1"
+            />
+          </g></svg
+        >Field Instruments
+      </div>
+      <span class="head-note">Experimental collection</span>
+      <div class="header-end">
+        <span class="online"><i></i> System online</span
+        ><button id="sound" class="quiet" aria-pressed="false">
+          <span data-icon="muted"></span><span id="sound-text">Sound off</span>
+        </button>
+      </div>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <div class="eyebrow"><b></b> EXPERIMENT 008 <em>/</em> ELECTROMAGNETISM</div>
+          <h1>Ferrofluid <i>Symphony</i></h1>
+        </div>
+        <p>Electromagnetic sculpture</p>
+      </section>
+      <div class="workbench">
+        <section class="viewer" aria-label="Interactive sculpture">
+          <div class="stage">
+            <canvas
+              id="chamber"
+              aria-label="Three-dimensional ferrofluid and copper electromagnet array. Drag to orbit."
+            ></canvas>
+            <div class="viewlabel"><span class="live-dot"></span> CHAMBER VIEW</div>
+            <button id="fullscreen" aria-label="Toggle chamber fullscreen" title="Fullscreen">
+              <span data-icon="expand"></span>
+            </button>
+            <div class="orbit-hint">
+              <span data-icon="orbit"></span> Drag to orbit <b>·</b> Scroll to zoom
+            </div>
+            <div class="stage-code">FIG. 08 <span>/</span> EM–140</div>
+          </div>
+          <div class="transport">
+            <button id="play" aria-label="Pause simulation" title="Play or pause">
+              <span data-icon="pause"></span>
+            </button>
+            <div class="transport-title">
+              <strong>Field sequence</strong><span id="phase-caption">Rosensweig Spikes</span>
+            </div>
+            <div class="scope">
+              <svg viewBox="0 0 640 34" preserveAspectRatio="none" aria-hidden="true">
+                <path id="wave-base" />
+                <path id="wave-on" /></svg
+              ><input
+                id="scrub"
+                type="range"
+                min="0"
+                max="30"
+                value="0"
+                step=".01"
+                aria-label="Seek showcase time"
+              /><i id="needle"></i>
+            </div>
+            <div class="time"><span id="time">00:00</span><em> / 00:30</em></div>
+          </div>
+        </section>
+        <aside>
+          <div class="panel-title">
+            <h2>Field controls</h2>
+            <span data-icon="sliders"></span>
+          </div>
+          <div class="sliders">
+            <label for="field"
+              >Magnetic field <output id="field-value">1.80 <small>T</small></output></label
+            ><input
+              id="field"
+              type="range"
+              min="0"
+              max="3"
+              step=".01"
+              value="1.8"
+              aria-label="Magnetic field strength in Tesla"
+            />
+            <label for="tempo"
+              >Pulse tempo <output id="tempo-value">140 <small>BPM</small></output></label
+            ><input id="tempo" type="range" min="60" max="200" step="1" value="140" />
+          </div>
+          <fieldset>
+            <legend>Harmonic mode</legend>
+            <div class="modes" id="modes"></div>
+          </fieldset>
+          <div class="accent-row">
+            <span>Coil accent</span>
+            <div id="swatches"></div>
+          </div>
+          <label class="auto" for="auto"
+            ><span><span data-icon="loop"></span> Auto showcase <small>30s</small></span
+            ><input type="checkbox" id="auto" checked /><i></i
+          ></label>
+          <button class="blast" id="blast"><span data-icon="bolt"></span> Magnet Blast</button>
+        </aside>
+      </div>
+      <footer>
+        <span>FIELD INSTRUMENTS <b>/</b> SCULPTURE SERIES</span
+        ><span>WEBGL 2.0 <b>·</b> REAL-TIME SYNTHESIS</span>
+      </footer>
+    </main>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

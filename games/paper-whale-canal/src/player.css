@@ -1,0 +1,139 @@
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #101c23;
+  color: #f1e4c1;
+}
+body {
+  display: grid;
+  place-items: center;
+  font-family: Georgia, serif;
+}
+.cinema {
+  position: relative;
+  width: min(100vw, 177.777778vh);
+  aspect-ratio: 16/9;
+  isolation: isolate;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.transport {
+  position: absolute;
+  left: 50%;
+  bottom: 3.4%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px 7px 8px;
+  width: min(360px, 88%);
+  background: rgba(17, 37, 45, 0.89);
+  border: 1px solid #9e9a7c88;
+  border-radius: 25px;
+  color: #e5d5ad;
+  box-shadow: 0 2px 12px #14293255;
+  transition: opacity 0.28s;
+}
+.ui-hidden .transport,
+.ui-idle:not(:focus-within) .transport {
+  pointer-events: none;
+  opacity: 0;
+}
+.ui-hidden {
+  cursor: none;
+}
+.time {
+  font:
+    11px/1.2 ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+button {
+  display: grid;
+  place-items: center;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.toggle {
+  width: 27px;
+  height: 27px;
+  border: 1px solid #b9a779aa;
+  border-radius: 50%;
+}
+.glyph {
+  width: 7px;
+  height: 9px;
+  border-left: 2px solid;
+  border-right: 2px solid;
+}
+.paused .glyph {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border: 0;
+  border-left: 7px solid;
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+}
+.timeline {
+  appearance: none;
+  cursor: pointer;
+  min-width: 0;
+  flex: 1;
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  accent-color: #e0c795;
+}
+.timeline::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(90deg, #d6b882 var(--pct, 0%), #73807b var(--pct, 0%));
+}
+.timeline::-moz-range-track {
+  height: 2px;
+  background: #80918a;
+}
+.timeline::-moz-range-progress {
+  background: #d6b882;
+  height: 2px;
+}
+.timeline::-webkit-slider-thumb {
+  appearance: none;
+  background: #ead6a5;
+  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -3px;
+}
+.timeline::-moz-range-thumb {
+  background: #ead6a5;
+  border: 0;
+  width: 8px;
+  height: 8px;
+}
+.hide {
+  border: 1px solid #9d9c8377;
+  border-radius: 3px;
+  font:
+    10px ui-monospace,
+    monospace;
+  width: 20px;
+  height: 18px;
+  padding: 0;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #e6cc89;
+  outline-offset: 3px;
+}

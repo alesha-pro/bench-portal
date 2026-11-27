@@ -1,0 +1,17 @@
+{
+  "slug": "escher-impossible-stairwell",
+  "title": "Escher’s Impossible Gravity Sanctuary",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js sandstone citadel with multi-axis gravity where thirty-five lantern bearers walk walls, ceilings, and waterwheels.",
+  "description": "An interactive Three.js / WebGL2 exhibit and 30-second short film. Thirty-five lantern bearers follow ten routes through a floating sandstone citadel where wall balconies and the ceiling cloister each obey their own local gravity, complete with a three-tier cascade driving a bronze wheel uphill.",
+  "accent": "#d9a45f",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Architecture",
+    "Optical Illusion"
+  ],
+  "cover": "cover.webp"
+}

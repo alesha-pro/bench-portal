@@ -1,0 +1,18 @@
+{
+  "slug": "magneto-ferrofluid-symphony",
+  "title": "Ferrofluid Electromagnetic Sculpture",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js and WebGL2 SDF sculpture of black ferrofluid pulsing with magnetic cusps and corona discharges inside eight copper coils.",
+  "description": "An interactive Three.js instrument and 30-second film, Ferrofluid Symphony. Eight copper electromagnets surround a pool of black ferrofluid beneath a ceiling return coil while a 140 BPM score drives real-time SDF magnetic cusps, levitating droplets, and corona discharges.",
+  "accent": "#4cc9f0",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "SDF",
+    "GLSL",
+    "Audio"
+  ],
+  "cover": "cover.webp"
+}

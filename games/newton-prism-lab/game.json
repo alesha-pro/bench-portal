@@ -1,0 +1,18 @@
+{
+  "slug": "newton-prism-lab",
+  "title": "Newton’s Prism & Dust Lab",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "An interactive Three.js optical workshop tracing sixteen spectral wavelengths through a rotating crown-glass prism, lens, and mirror.",
+  "description": "An interactive Three.js / WebGL2 optical bench and 30-second short film. A shutter admits a single shaft of sunlight through a rotating crown-glass prism, dispersing sixteen wavelengths from indigo to crimson across a brass mirror, biconvex lens, and water-filled sphere onto ruled parchment.",
+  "accent": "#f2b857",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Optics",
+    "Prism",
+    "Spectrum"
+  ],
+  "cover": "cover.webp"
+}

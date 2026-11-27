@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#122731" />
+    <title>The Paper Whale Over the Canal · Бумажный кит над каналом</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./src/player.css" />
+  </head>
+  <body>
+    <main class="cinema" aria-label="The Paper Whale Over the Canal">
+      <canvas
+        id="film"
+        width="1280"
+        height="720"
+        role="img"
+        aria-label="Animated ink and gold illustration of a paper whale rising from a snowy canal"
+      ></canvas>
+      <div class="transport" role="group" aria-label="Film controls">
+        <button class="toggle" type="button" aria-label="Pause" title="Play or pause (Space)">
+          <span class="glyph" aria-hidden="true"></span>
+        </button>
+        <span class="time" id="elapsed">0:00</span>
+        <input
+          class="timeline"
+          type="range"
+          min="0"
+          max="45"
+          step="0.01"
+          value="0"
+          aria-label="Film timeline"
+        />
+        <span class="time end">0:45</span>
+        <button class="hide" type="button" aria-label="Hide controls (H)" title="Hide controls (H)">H</button>
+      </div>
+    </main>
+    <script type="module" src="./src/player.js"></script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "slug": "vhs-crt-arcade-corner-90s",
+  "title": "1994 Midnight CRT & VHS Sanctuary",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A Three.js 1990s editing den with six curved CRT monitors, an open VHS cassette deck, magnetic degauss waves, and a Star Cadet cabinet.",
+  "description": "A Three.js / WebGL2 editing den set at 11:47 PM in 1994. Six curved televisions and broadcast monitors share a walnut desk with a tabletop Star Cadet arcade cabinet, animated VHS tape carriage, magnetic degauss sweep, and CRT phosphor grille post-processing.",
+  "accent": "#66d9e8",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "CRT",
+    "GLSL",
+    "Retro"
+  ],
+  "cover": "cover.webp"
+}

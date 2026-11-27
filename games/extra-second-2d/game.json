@@ -1,0 +1,17 @@
+{
+  "slug": "extra-second-2d",
+  "title": "The Extra Second",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A 45-second dialogue-free Canvas 2D animated short at Bellwick station where time freezes in mid-motion for twenty-six seconds.",
+  "description": "A 45-second, dialogue-free animated short set at Bellwick station and painted in native Canvas 2D. A tabby follows the sweeper past travel posters while a porter pushes a loaded trolley and a family waves from the far platform; at the sixth second clockwork, moths, and steam freeze in mid-motion before the station returns to life at 32 seconds. Supports play/pause, timeline scrubbing, and clean HUD toggling.",
+  "accent": "#e0a96d",
+  "tags": [
+    "Canvas 2D",
+    "Animation",
+    "Short Film",
+    "Procedural"
+  ],
+  "cover": "cover.webp"
+}

@@ -1,0 +1,18 @@
+{
+  "slug": "four-engine-paper-plane-split",
+  "title": "One Scene, Four Rendering Worlds",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A synchronized WebGL2 and Canvas 2D split-screen study where one paper plane flies across four live rendering styles simultaneously.",
+  "description": "Foldframe is an interactive WebGL2 and Canvas 2D landscape study. A folded orange paper airplane crosses one continuous alpine valley in 30 seconds while three draggable split boundaries expose four synchronized interpretations of the same flight, terrain, stream, cottages, and turning windmill.",
+  "accent": "#ee6f3d",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Canvas 2D",
+    "Split-Screen",
+    "Interactive"
+  ],
+  "cover": "cover.webp"
+}

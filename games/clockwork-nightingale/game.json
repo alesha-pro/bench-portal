@@ -1,0 +1,18 @@
+{
+  "slug": "clockwork-nightingale",
+  "title": "Clockwork Nightingale",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "An interactive Three.js cutaway of a jewelled cam-driven singing mechanical bird with articulated gears and escapement movement.",
+  "description": "An interactive Three.js / WebGL2 cutaway of a jewelled cam-driven singing mechanical nightingale inside an aureate cabinet. Inspect the interlocking brass gears, cams, bellows, and articulated wings while switching between guided showcase and free orbit.",
+  "accent": "#d7b580",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Clockwork",
+    "3D",
+    "Mechanical"
+  ],
+  "cover": "cover.webp"
+}

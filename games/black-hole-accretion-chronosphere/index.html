@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#101113" />
+    <title>Gargantua — Parallax Observatory</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='9' fill='%23121416'/%3E%3Cg stroke='%23ff8959' stroke-width='3' fill='none' transform='rotate(-28 24 24)'%3E%3Ccircle cx='24' cy='24' r='10'/%3E%3Cellipse cx='24' cy='24' rx='20' ry='5'/%3E%3C/g%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <header class="mast">
+      <div class="brand">
+        <svg viewBox="0 0 47 36" aria-hidden="true">
+          <g transform="rotate(-26 23.5 18)" fill="none" stroke="currentColor">
+            <ellipse cx="23.5" cy="18" rx="20" ry="5.5" stroke-width="2.1" />
+            <path
+              d="M13 17.2a10.6 10.6 0 0 1 21 0M14.7 23.3a10.7 10.7 0 0 0 18.3-.7"
+              stroke-width="2.3"
+            />
+          </g></svg
+        ><strong>Parallax</strong><span>Observatory</span>
+      </div>
+      <nav aria-label="Workspace">
+        <button id="nav-view" class="tab active" data-icon="scope">Simulator</button
+        ><button id="notes" class="tab" data-icon="book">Field notes</button>
+      </nav>
+      <div class="online"><i></i>System online</div>
+    </header>
+    <main>
+      <header class="intro">
+        <div>
+          <div class="eyebrow"><b></b> Field observation <em>/</em> 001</div>
+          <div class="title-line">
+            <h1>Gargantua</h1>
+            <p>Relativistic black hole<br /> &amp; tidal disruption</p>
+          </div>
+        </div>
+        <div class="spectrum" aria-label="Spectral shift reference, red to blue">
+          <span>SPECTRAL SHIFT</span>
+          <div class="spectrumline"></div>
+          <div class="spectrumlabels"><small>REDSHIFT</small><small>BLUESHIFT</small></div>
+        </div>
+      </header>
+      <div class="workspace">
+        <section class="observation" aria-label="Live black hole observation">
+          <div id="viewport">
+            <canvas
+              id="space"
+              aria-label="Lensed black hole, accretion disk, tidal star and orbital probe"
+            ></canvas>
+            <div class="viewtop">
+              <div class="feed"><i></i> Optical feed <span>/</span><b>CAM 01</b></div>
+              <div class="viewtools">
+                <button
+                  id="annotate"
+                  class="iconbutton"
+                  aria-label="Toggle observation annotations"
+                  aria-pressed="true"
+                  title="Observation annotations"
+                  data-icon="focus"
+                ></button
+                ><button
+                  id="expand"
+                  class="iconbutton"
+                  aria-label="Expand observation"
+                  title="Expand observation"
+                  data-icon="expand"
+                ></button>
+              </div>
+            </div>
+            <div id="mark" class="landmark"><i></i><b></b><span>Photon ring</span></div>
+            <div class="viewbase">
+              <div class="axes">
+                <svg viewBox="0 0 47 37" aria-hidden="true">
+                  <g fill="none" stroke-width="1">
+                    <path d="M19 24 37 28" stroke="#ec8d62" />
+                    <path d="M19 24 19 5" stroke="#afb8bc" />
+                    <path d="M19 24 5 30" stroke="#719da6" />
+                  </g>
+                  <g font-size="6" fill="#bbc3c6" font-family="monospace">
+                    <text x="39" y="31">X</text>
+                    <text x="17" y="5">Y</text>
+                    <text x="0" y="33">Z</text>
+                  </g></svg
+                ><span id="view-name">Orbital camera</span>
+              </div>
+              <div class="ruler"><span id="scale-label">5 rₛ</span><b id="scale-bar"></b></div>
+            </div>
+            <div id="loading" role="status">Calibrating optical feed…</div>
+          </div>
+          <div class="transport">
+            <button
+              id="play"
+              class="play"
+              data-icon="play"
+              aria-label="Play auto showcase"
+              aria-pressed="false"
+            ></button>
+            <div class="transport-title">
+              <strong>Auto showcase</strong><small>30s sequence</small>
+            </div>
+            <div class="scrubber">
+              <input
+                type="range"
+                id="seek"
+                aria-label="Showcase time"
+                min="0"
+                max="30"
+                step=".01"
+                value="0"
+              />
+            </div>
+            <output id="time">00:00 <span>/ 00:30</span></output>
+          </div>
+        </section>
+        <aside class="panel">
+          <header class="panel-title">
+            <i data-icon="sliders"></i>
+            <h2>Field controls</h2>
+            <button
+              id="reset"
+              class="iconbutton"
+              data-icon="reset"
+              title="Reset field controls"
+              aria-label="Reset field controls"
+            ></button>
+          </header>
+          <div class="control-body">
+            <section class="group">
+              <h3><b></b>Spacetime</h3>
+              <label class="slider"
+                ><span>Black hole mass</span><output id="mass-out">1.00 ×</output
+                ><input id="mass" type="range" min=".7" max="1.4" step=".01" value="1"
+              /></label>
+              <label class="slider"
+                ><span>Lensing strength</span><output id="lens-out">1.00 ×</output
+                ><input id="lens" type="range" min=".55" max="1.35" step=".01" value="1"
+              /></label>
+              <label class="toggle"
+                ><span>Doppler beaming</span><input type="checkbox" id="doppler" checked /><i></i
+              ></label>
+            </section>
+            <section class="group">
+              <h3><b></b>Camera</h3>
+              <label class="slider"
+                ><span>Orbit azimuth</span><output id="azimuth-out">11°</output
+                ><input id="azimuth" type="range" min="-180" max="180" step=".1" value="11"
+              /></label>
+              <label class="slider"
+                ><span>Inclination</span><output id="inclination-out">81°</output
+                ><input id="inclination" type="range" min=".5" max="89.5" step=".1" value="81"
+              /></label>
+            </section>
+            <section class="group event">
+              <h3><b></b>Tidal event</h3>
+              <button id="trigger" data-icon="flare">Trigger star plunge<span>↗</span></button>
+              <div class="event-status">
+                <i></i><output id="event-status">Star in orbit</output>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </div>
+      <footer>
+        <span><i></i> WebGL 2.0 <b>/</b> Schwarzschild metric</span
+        ><span class="gesture" data-icon="mouse">Drag the field to orbit</span>
+      </footer>
+    </main>
+    <dialog id="field-notes">
+      <button
+        class="iconbutton close"
+        id="close-notes"
+        data-icon="close"
+        aria-label="Close field notes"
+      ></button>
+      <div class="eyebrow"><b></b>Observation 001</div>
+      <h2>Field notes</h2>
+      <dl>
+        <dt>The shadow</dt>
+        <dd>
+          Rays that cross the horizon go dark. Light skimming the unstable photon orbit winds around
+          the shadow and forms a narrow critical ring.
+        </dd>
+        <dt>The two halos</dt>
+        <dd>
+          Follow the warm plasma across the field. The far side of the same disk appears above and
+          below the shadow as light bends back toward the observer.
+        </dd>
+        <dt>Spectral shift</dt>
+        <dd>
+          Orbiting gas beams light toward the camera on one limb. On the retreating limb the light
+          dims and shifts toward amber.
+        </dd>
+        <dt>Tidal disruption</dt>
+        <dd>
+          Trigger the plunge to watch the blue-gold star shed an eccentric ribbon of debris. The
+          gold-foil research probe tracks the event with a pulsed rangefinder.
+        </dd>
+      </dl>
+    </dialog>
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>

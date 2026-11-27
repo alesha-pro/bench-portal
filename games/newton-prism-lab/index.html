@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#151510" />
+    <title>Newton’s Prism &amp; Dust Lab · The Optical Cabinet</title>
+    <link rel="icon" href="./assets/mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas
+      id="bench"
+      aria-label="Interactive three dimensional optical workshop"
+    ></canvas>
+    <div class="interface">
+      <header class="mast">
+        <div class="brand">
+          <img src="./assets/mark.svg" alt="" /><span>The Optical Cabinet</span>
+        </div>
+        <span class="collection">Studies in light</span>
+        <div class="header-actions">
+          <button
+            id="sound"
+            aria-pressed="false"
+            title="Toggle the glass harmonica soundtrack"
+          >
+            <span class="soundwave"><i></i><i></i><i></i><i></i></span
+            ><span id="soundText">Sound off</span>
+          </button>
+          <button
+            id="fullscreen"
+            aria-label="Enter fullscreen"
+            title="Fullscreen"
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M4 9V4h5m6 0h5v5M4 15v5h5m6 0h5v-5" />
+            </svg>
+          </button>
+        </div>
+      </header>
+      <section class="intro">
+        <div class="eyebrow">
+          <span class="goldrule"></span> Experiment 01 <b> / </b> Dispersion
+        </div>
+        <h1>Newton’s Prism<br /><em>&amp; Dust Lab</em></h1>
+      </section>
+      <aside class="controls" id="controls">
+        <button
+          class="panel-head"
+          id="fold"
+          aria-expanded="true"
+          aria-controls="parameters"
+        >
+          <span
+            ><svg viewBox="0 0 24 24">
+              <path d="M3 6h8m5 0h5M3 12h3m5 0h10M3 18h11m5 0h2" />
+              <circle cx="13" cy="6" r="2" />
+              <circle cx="8" cy="12" r="2" />
+              <circle cx="16" cy="18" r="2" /></svg
+            >Bench controls</span
+          ><i aria-hidden="true"></i>
+        </button>
+        <div id="parameters">
+          <div id="sliders"></div>
+          <button id="reset">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 10a8 8 0 1 1 1.4 7.1M4 4v6h6" /></svg
+            >Reset bench
+          </button>
+        </div>
+      </aside>
+      <div class="spectrum">
+        <div class="spectrum-title">
+          <span>Visible spectrum</span><span>16 bands</span>
+        </div>
+        <div class="spectral-strip"></div>
+        <div class="spectrum-scale">
+          <span>410</span><span>540</span><span>675 nm</span>
+        </div>
+      </div>
+      <div class="gesture" id="gesture">
+        <span class="gestureDot"></span
+        ><span
+          >Drag optic to move <b>·</b> Shift + drag to rotate <b>·</b> Drag room
+          to orbit</span
+        >
+      </div>
+      <footer>
+        <button
+          id="play"
+          aria-pressed="true"
+          title="Play or pause the 30-second showcase"
+        >
+          <span class="playicon"></span><span>Auto showcase</span>
+        </button>
+        <div class="clock">
+          <strong id="clock">00:00</strong><span> / 00:30</span>
+        </div>
+        <input
+          id="seek"
+          type="range"
+          min="0"
+          max="30"
+          step=".001"
+          value="0"
+          aria-label="Showcase time"
+        />
+        <div class="chapter">
+          <span id="chapterNo">I</span
+          ><strong id="chapterName">The aperture</strong>
+        </div>
+      </footer>
+    </div>
+    <div id="loading">Opening the optical cabinet…</div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

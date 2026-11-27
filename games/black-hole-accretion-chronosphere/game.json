@@ -1,0 +1,18 @@
+{
+  "slug": "black-hole-accretion-chronosphere",
+  "title": "Gargantua",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A relativistic WebGL2 GLSL raymarched black hole with Schwarzschild gravitational lensing, Doppler-shifted accretion disk, and tidal disruption.",
+  "description": "A real-time WebGL2 GLSL observation and 30-second flight descending from a polar view into the equatorial plane of an incandescent accretion disk around Gargantua as a blue-gold star undergoes tidal disruption past an orbiting telemetry probe.",
+  "accent": "#ff8959",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "Astrophysics",
+    "Shaders"
+  ],
+  "cover": "cover.webp"
+}

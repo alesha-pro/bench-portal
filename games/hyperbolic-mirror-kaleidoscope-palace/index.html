@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101816"><title>The Infinite KIFS Alhambra · Hyperbolic Mirror Cathedral</title>
+<link rel="icon" href="data:,"><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="palace" tabindex="0" aria-label="Interactive flight through the Hyperbolic Mirror Cathedral"></canvas>
+<div id="interface">
+<header><span class="seal" aria-hidden="true"><i></i></span><div><h1>The Infinite KIFS Alhambra</h1><p>Hyperbolic Mirror Cathedral</p></div></header>
+<div class="clock"><span class="phase-dot"></span><span id="clock">00:00</span><span class="duration"> / 00:30</span></div>
+<footer>
+<div class="transport"><button id="pause" type="button" aria-label="Pause showcase"><span class="pause-icon"></span></button><div><span id="mode">Auto showcase</span><span id="chapter">The gilded nave</span></div></div>
+<button id="controls" aria-expanded="false" aria-controls="settings"><span class="sliders" aria-hidden="true">☷</span> Flight controls</button>
+</footer>
+<section id="settings" aria-label="Flight controls" hidden>
+<div class="setting-head"><h2>Flight controls</h2><button id="close" aria-label="Close flight controls">×</button></div>
+<label for="fold">Folding symmetry angle <output id="fold-out">25°</output></label>
+<input id="fold" type="range" min="0" max="100" value="48">
+<label for="palette">Material palette</label><select id="palette"><option value="0">Gold</option><option value="1">Marble</option><option value="2">Lapis</option></select>
+<label for="speed">Flight speed <output id="speed-out">1.00×</output></label>
+<input id="speed" type="range" min="25" max="200" step="5" value="100">
+<label for="glow">Volumetric glow <output id="glow-out">100%</output></label>
+<input id="glow" type="range" min="0" max="200" step="5" value="100">
+<label class="switch" for="auto">Auto showcase (30s)<input id="auto" type="checkbox" checked><span aria-hidden="true"></span></label>
+<p id="fly-help" hidden>Drag to look. Use WASD to fly and Q / E to change height.</p>
+</section>
+<div class="timeline"><i id="progress"></i></div>
+</div>
+<div id="loading" role="status">Opening the cathedral…</div>
+<script type="module" src="app.js"></script>
+</body></html>

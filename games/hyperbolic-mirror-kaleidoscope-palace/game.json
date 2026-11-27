@@ -1,0 +1,18 @@
+{
+  "slug": "hyperbolic-mirror-kaleidoscope-palace",
+  "title": "The Infinite KIFS Alhambra",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A real-time WebGL2 GLSL fractal flight through an infinite kaleidoscopic Moorish mirror cathedral with folding symmetry and material presets.",
+  "description": "Hyperbolic Mirror Cathedral is an interactive WebGL2 GLSL raymarched flight and 30-second scored showcase through an infinite KIFS Alhambra. Glide past gilded crystal lamps and octagonal atriums, adjust folding symmetry angles, switch between Gold, Marble, and Lapis palettes, or fly freely with WASD.",
+  "accent": "#e5ba68",
+  "tags": [
+    "WebGL2",
+    "GLSL",
+    "Raymarching",
+    "Fractal",
+    "KIFS"
+  ],
+  "cover": "cover.webp"
+}

@@ -1,0 +1,18 @@
+{
+  "slug": "ocean-waves-tsunami-ukiyoe",
+  "title": "The Great Wave Reborn in 3D",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A Three.js and ink-GLSL 3D diorama of Hokusai’s Great Wave with three oshiokuri-bune boats and Mount Fuji framed beneath the crest.",
+  "description": "A Three.js / WebGL2 interpretation of Hokusai's Under the Wave off Kanagawa on a carved cedar base. Three oshiokuri-bune boats ride the swelling indigo water beneath curling foam claws with Mount Fuji framed inside the hollow of the breaking wave.",
+  "accent": "#4a89b8",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "GLSL",
+    "Ukiyo-e",
+    "Ocean"
+  ],
+  "cover": "cover.webp"
+}

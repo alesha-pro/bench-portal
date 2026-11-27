@@ -1,0 +1,18 @@
+{
+  "slug": "dyson-swarm-megastructure",
+  "title": "Dyson Swarm: Harvesting a Dying Star",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js orbital megastructure with thousands of gold collector mirrors orbiting a red giant star and cyan relay beams.",
+  "description": "An interactive Three.js observatory and 30-second film. The camera clears the gantry at Keel 04, crosses a cyan energy relay surge, and pulls back through eight inclined collector belts where thousands of articulated gold mirrors harvest a dying red giant.",
+  "accent": "#efb967",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Sci-Fi",
+    "Space",
+    "Instancing"
+  ],
+  "cover": "cover.webp"
+}

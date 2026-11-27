@@ -1,0 +1,18 @@
+{
+  "slug": "glassblower-molten-furnace",
+  "title": "The Glassblower’s Molten Furnace",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "An interactive Three.js Murano hot-shop at dusk where a white-hot gather is blown, shaped, and quenched into cobalt glass with gold leaf.",
+  "description": "An interactive Three.js glassblowing workshop set in Murano at dusk. Watch a white-hot gather pulled from the furnace, inflated, shaped with spring jacks, and quenched into a cobalt vessel threaded with gold leaf and projected caustics.",
+  "accent": "#ea8152",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Caustics",
+    "Glass",
+    "Workshop"
+  ],
+  "cover": "cover.webp"
+}

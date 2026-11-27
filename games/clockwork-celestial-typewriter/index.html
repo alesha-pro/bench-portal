@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#191b1b"><link rel="icon" href="data:,">
+<title>The Midnight Typewriter · Words Taking Flight</title>
+<link rel="stylesheet" href="./src/player.css">
+</head>
+<body>
+<main class="screening">
+<header class="mast">
+  <div class="titlemark"><span class="quill" aria-hidden="true">❧</span><h1>The Midnight Typewriter</h1></div>
+  <p>Words Taking Flight</p>
+</header>
+<div class="picture"><canvas id="film" aria-label="Animated film of an enchanted typewriter in a moonlit attic">The Midnight Typewriter — Words Taking Flight.</canvas></div>
+<section class="transport" aria-label="Film controls">
+  <button id="play" aria-label="Pause" title="Play or pause (Space)"><i></i></button>
+  <output id="time" for="seek">0:00</output><input id="seek" type="range" min="0" max="45" step=".01" value="0" aria-label="Timeline"><span class="end">0:45</span>
+  <div class="setting"><label for="glow"><span aria-hidden="true">✧</span> Magic glow</label><input id="glow" type="range" min="0" max="1.6" step=".01" value="1"></div>
+  <button id="hide" aria-label="Hide controls" title="Hide controls (H)">Hide <kbd>H</kbd></button>
+</section>
+</main>
+<script type="module" src="./src/player.js"></script>
+</body></html>

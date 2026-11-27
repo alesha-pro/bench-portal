@@ -1,0 +1,18 @@
+{
+  "slug": "pixel-art-sunken-temple-diorama",
+  "title": "Jungle Cenote Temple",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js HD-2D pixel-art diorama rendered at 480×270 with ordered Bayer dithering, waterfalls, a mana crystal, and a macaw.",
+  "description": "An interactive Three.js HD-2D pixel-art jungle diorama and 30-second scored short rendered natively at 480×270 with configurable Bayer dithering. Four carved spouts feed a stepped jade pool beneath a limestone sanctuary housing a rotating mana crystal and a perched scarlet macaw.",
+  "accent": "#43d69d",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Pixel Art",
+    "HD-2D",
+    "Diorama"
+  ],
+  "cover": "cover.webp"
+}

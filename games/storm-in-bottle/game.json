@@ -1,0 +1,18 @@
+{
+  "slug": "storm-in-bottle",
+  "title": "Storm in a Bottle",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "An interactive maritime diorama inside hand-blown green glass where shaking the bottle sends storm waves and refracted caustics across an oak desk.",
+  "description": "An interactive maritime diorama and 30-second short film. A three-masted galleon rides a miniature ocean inside hand-blown green glass; shaking the bottle sends a wave down its long axis and sweeps refracted light across a rolled chart and oak desk.",
+  "accent": "#6ec9b8",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Water",
+    "Refraction",
+    "Diorama"
+  ],
+  "cover": "cover.webp"
+}

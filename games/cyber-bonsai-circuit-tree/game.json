@@ -1,0 +1,18 @@
+{
+  "slug": "cyber-bonsai-circuit-tree",
+  "title": "The Cyber-Bonsai",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive WebGL2 sculpture pairing a twisted bronze circuit-tree trunk and emerald PCB soil with glowing orange cathodes and plum blossoms.",
+  "description": "An interactive WebGL2 sculpture and 30-second studio film. Two warm orange cathode tubes illuminate an emerald circuit board beneath a twisted bronze bonsai trunk as glass shoots carry optical data pulses to five-petalled plum blossoms.",
+  "accent": "#f28544",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Cyberpunk",
+    "Bonsai",
+    "Sculpture"
+  ],
+  "cover": "cover.webp"
+}

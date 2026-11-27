@@ -1,0 +1,18 @@
+{
+  "slug": "submerged-piano-coral-cathedral",
+  "title": "The Sunken Grand Piano",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js underwater cenote cathedral where a coral-encrusted grand piano plays an eight-bar D-minor étude with sampled keys.",
+  "description": "An interactive Three.js / WebGL2 étude and 30-second film. Inside a sunlit limestone cenote cathedral, a submerged concert grand plays an original eight-bar score in D minor as its hammers strike keys, harp wires vibrate, and bubbles rise through sunbeams.",
+  "accent": "#4ecdc4",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Underwater",
+    "Music",
+    "Piano"
+  ],
+  "cover": "cover.webp"
+}

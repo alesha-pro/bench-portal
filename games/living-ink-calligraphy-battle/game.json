@@ -1,0 +1,18 @@
+{
+  "slug": "living-ink-calligraphy-battle",
+  "title": "Living Sumi-e Scroll",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A 45-second Canvas 2D sumi-e scroll film where calligraphy brush strokes rise into a fighting tiger and winged dragon.",
+  "description": "A 45-second hand-drawn Canvas 2D film on a silk-mounted xuan-paper scroll. A bamboo brush lays down broken inscriptions whose wet ink rises into an articulated tiger and winged dragon, collides in vermilion seal impacts and gold leaf, and settles back into a circular painting.",
+  "accent": "#c84638",
+  "tags": [
+    "Canvas 2D",
+    "Calligraphy",
+    "Sumi-e",
+    "Animation",
+    "Short Film"
+  ],
+  "cover": "cover.webp"
+}

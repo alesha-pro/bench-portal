@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#151718" />
+    <title>Neon Alley Ramen & Monorail Rain · Yoru Archive</title>
+    <link rel="stylesheet" href="style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='7' fill='%23f26945'/%3E%3Ctext x='5' y='32' font-size='32'%3E夜%3C/text%3E%3C/svg%3E"
+    />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <b class="seal" lang="ja">夜</b><strong>YORU<span> ARCHIVE</span></strong>
+      </div>
+      <i></i><span class="collection">Interactive dioramas</span>
+      <div class="header-right">
+        <span class="live"><b></b> LIVE SCENE</span
+        ><button id="screen" class="iconbtn" title="Toggle fullscreen" aria-label="Toggle fullscreen">
+          ⛶
+        </button>
+      </div>
+    </header>
+    <main id="stage">
+      <canvas id="alley" aria-label="Interactive three-dimensional rainy midnight ramen alley"></canvas>
+      <div class="caption">
+        <div class="eyebrow"><b></b> ENVIRONMENT STUDY <em>/</em> 07</div>
+        <h1>Neon Alley</h1>
+        <p>Ramen &amp; Monorail Rain</p>
+      </div>
+      <div class="shotmark"><b></b> <span id="shot">ALLEY WIDE</span></div>
+      <div id="loading">Opening the alley…</div>
+    </main>
+    <footer>
+      <div class="transport">
+        <button id="auto" aria-pressed="true" title="Play or pause the 30-second camera showcase">
+          <span id="playIcon">Ⅱ</span> Auto Showcase <small>(30s)</small></button
+        ><span id="time">00:00</span
+        ><input
+          id="seek"
+          aria-label="Showcase timeline"
+          type="range"
+          min="0"
+          max="30"
+          value="0"
+          step=".01"
+        /><span class="end">00:30</span><span class="help">Drag to orbit <b>·</b> Scroll to zoom</span>
+      </div>
+      <div class="deck">
+        <div class="control weather">
+          <label for="rain">Rain &amp; wind <output id="rainvalue">72%</output></label
+          ><input
+            id="rain"
+            type="range"
+            min="0"
+            max="100"
+            value="72"
+            aria-label="Rain and wind intensity"
+          />
+        </div>
+        <div class="control">
+          <label for="palette">Neon palette</label>
+          <div class="select">
+            <b class="swatch"></b
+            ><select id="palette" aria-label="Neon Sign Color Mode">
+              <option>Tokyo Red/Cyan</option>
+              <option>Blade Amber</option>
+              <option>Acid Violet</option>
+            </select>
+          </div>
+        </div>
+        <div class="control">
+          <label for="camera">Camera preset</label>
+          <div class="select">
+            <select id="camera">
+              <option>Alley Wide</option>
+              <option>Counter Steam Macro</option>
+              <option>Puddle Reflection</option>
+            </select>
+          </div>
+        </div>
+        <div class="control triggers">
+          <span class="label">Scene actions</span>
+          <div>
+            <button id="train"><span>⇥</span> Trigger Monorail Pass</button
+            ><button id="cook"><span>♨</span> Robot Chef Cook Cycle</button>
+          </div>
+        </div>
+      </div>
+    </footer>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

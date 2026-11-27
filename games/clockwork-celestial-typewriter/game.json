@@ -1,0 +1,17 @@
+{
+  "slug": "clockwork-celestial-typewriter",
+  "title": "The Midnight Typewriter",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "A 45-second Canvas 2D animated film where typed ink rises from a lamplit attic typewriter into swallows, a steam train, boats, and stars.",
+  "description": "A 45-second illustrated Canvas 2D film. At a lamplit attic desk, a mechanical typewriter prints four lines of verse whose ink lifts off the page into swallows, a miniature steam train, paper boats, and constellations under the gaze of a ginger cat before one initial returns to begin again.",
+  "accent": "#e5b869",
+  "tags": [
+    "Canvas 2D",
+    "Animation",
+    "Short Film",
+    "Procedural"
+  ],
+  "cover": "cover.webp"
+}

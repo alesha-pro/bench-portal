@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#f7f6f1" />
+    <link rel="icon" href="data:," />
+    <title>One Scene, Four Rendering Worlds · Foldframe</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="mast">
+      <div class="mast-inner">
+        <div class="brand"><span class="brandmark" aria-hidden="true"></span>Foldframe</div>
+        <span class="mast-line"></span><span class="studio">Motion studies</span>
+        <div class="mast-actions">
+          <button id="sound" aria-pressed="false">
+            <i data-icon="muted"></i><span>Sound off</span></button
+          ><button id="expand"><i data-icon="expand"></i><span>Fullscreen</span></button>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <h1>One Scene, Four Rendering Worlds<span>.</span></h1>
+          <p>
+            A paper airplane in flight. Drag the dividers to explore four takes on the same valley.
+          </p>
+        </div>
+        <div class="live"><span></span> LIVE RENDER</div>
+      </section>
+      <section class="viewer" aria-label="Interactive landscape and playback controls">
+        <div class="stage" id="stage">
+          <canvas
+            id="scene"
+            width="1920"
+            height="1080"
+            aria-label="Animated valley panorama sliced into gouache, vector, neon and clay"
+          ></canvas>
+          <div id="dividers"></div>
+          <button id="back"><i data-icon="split"></i>Back to split view</button
+          ><button id="restore" aria-label="Restore controls" title="Restore controls (H)">
+            <i data-icon="panel"></i>
+          </button>
+        </div>
+        <div class="transport">
+          <button id="play" aria-label="Pause" title="Play or pause (Space)">
+            <i data-icon="pause"></i>
+          </button>
+          <div class="clock"><output id="elapsed">00:00</output><span> / 00:30</span></div>
+          <div class="timeline">
+            <input
+              type="range"
+              min="0"
+              max="30"
+              step=".001"
+              value="0"
+              id="timeline"
+              aria-label="Timeline scrub"
+            />
+          </div>
+          <label class="speed"
+            ><i data-icon="speed"></i
+            ><select id="speed" aria-label="Airplane speed">
+              <option value=".5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2×</option></select
+            ><i data-icon="down"></i
+          ></label>
+          <span class="rule"></span
+          ><button
+            id="auto"
+            role="switch"
+            aria-checked="true"
+            aria-label="Auto showcase (30s)"
+            title="Start or stop the repeating 30-second showcase"
+          >
+            <span class="switch"></span><span>Auto showcase</span>
+          </button>
+        </div>
+      </section>
+      <section class="inspect" aria-label="Renderer inspection">
+        <h2>Inspect renderer</h2>
+        <div id="modes" class="modes" role="group" aria-label="View mode">
+          <button data-mode="-1" aria-pressed="true"><i data-icon="split"></i>Split view</button>
+          <button data-mode="0"><b></b>Gouache &amp; Ink</button
+          ><button data-mode="1"><b></b>Motion Vector</button
+          ><button data-mode="2"><b></b>Neon Cyber</button
+          ><button data-mode="3"><b></b>Clay Sculpture</button>
+        </div>
+      </section>
+      <footer>
+        <span class="keyhelp"
+          ><kbd>1</kbd>–<kbd>4</kbd> Inspect <kbd>H</kbd> Hide HUD <kbd>Space</kbd> Play /
+          pause</span
+        ><span>WEBGL 2 <em>+</em> CANVAS 2D</span>
+      </footer>
+    </main>
+    <script type="importmap">
+      { "imports": { "three": "./vendor/three/build/three.module.js" } }
+    </script>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

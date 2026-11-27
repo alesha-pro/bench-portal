@@ -1,0 +1,18 @@
+{
+  "slug": "alchemist-potion-distillery",
+  "title": "The Midnight Alchemist’s Glass Distillery",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js candlelit stone laboratory with boiling emerald vitriol, silver condenser coils, and glowing azure drops.",
+  "description": "An interactive Three.js still life and 30-second short film set in a candlelit stone laboratory. Follow emerald vitriol from the boiling retort through a silver condenser coil, watch an azure drop strike the crystal receiver, and orbit the crowned raven skull and violet-gold tincture.",
+  "accent": "#4ee09c",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Alchemy",
+    "Glass",
+    "Still Life"
+  ],
+  "cover": "cover.webp"
+}

@@ -1,0 +1,391 @@
+:root {
+  color-scheme: dark;
+  font-family: "DM Sans","Helvetica Neue",Arial,sans-serif;
+  color: #f5eee1;
+  background: #101815;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+button,select,input {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible,select:focus-visible,input:focus-visible {
+  outline: 2px solid #e3c080;
+  outline-offset: 4px;
+}
+
+#palace {
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  touch-action: none;
+  outline: 0;
+}
+
+#interface {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg,#030e108c,transparent 20%,transparent 83%,#030e109e);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  position: absolute;
+  left: clamp(22px,3.1vw,60px);
+  top: clamp(22px,4.7vh,52px);
+  text-shadow: 0 2px 18px #000;
+}
+
+h1,h2,p {
+  margin: 0;
+}
+
+h1,h2 {
+  font-family: "Cormorant Garamond",Georgia,serif;
+  font-weight: 400;
+}
+
+h1 {
+  font-size: clamp(21px,2.32vw,37px);
+  letter-spacing: -.035em;
+  line-height: 1.12;
+}
+
+header p {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .29em;
+  color: #eddbb7;
+  margin-top: 7px;
+}
+
+.seal {
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  position: relative;
+  color: #f2d5a0;
+  filter: drop-shadow(0 2px 4px #15160e);
+}
+
+.seal:before,.seal:after,.seal i:before,.seal i:after {
+  content: "";
+  display: block;
+  position: absolute;
+  inset: 5px;
+  border: 1px solid currentColor;
+}
+
+.seal:after,.seal i:after {
+  transform: rotate(45deg);
+}
+
+.seal i:before,.seal i:after {
+  inset: 11px;
+}
+
+.clock {
+  position: absolute;
+  top: clamp(28px,6vh,62px);
+  right: 3.1vw;
+  color: #f2e6cd;
+  font: 11px/1.5 "IBM Plex Mono",monospace;
+  letter-spacing: .08em;
+  text-shadow: 0 2px 5px #000;
+}
+
+.duration {
+  opacity: .65;
+}
+
+.phase-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 10px 2px 0;
+  background: #e9bf77;
+  transform: rotate(45deg);
+}
+
+footer {
+  position: absolute;
+  bottom: clamp(20px,4vh,42px);
+  left: 3.1vw;
+  right: 3.1vw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.transport>div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-shadow: 0 1px 5px #101815;
+}
+
+#mode {
+  font-size: 10px;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+}
+
+#chapter {
+  font: italic 17px Georgia,serif;
+  color: #ead8ad;
+}
+
+footer button,#settings {
+  pointer-events: auto;
+  background: #101c1bea;
+  border: 1px solid #c4a77977;
+  box-shadow: 0 4px 26px #0003;
+}
+
+footer button:hover,#close:hover {
+  background-color: #32403a;
+}
+
+#pause {
+  border-radius: 50%;
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+}
+
+.pause-icon {
+  border-left: 2px solid #e5cc9c;
+  border-right: 2px solid #e5cc9c;
+  width: 8px;
+  height: 11px;
+}
+
+.paused .pause-icon {
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-right: 0;
+  border-left: 8px solid #e5cc9c;
+  margin-left: 2px;
+}
+
+#controls {
+  border-radius: 4px;
+  padding: 9px 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  letter-spacing: .035em;
+}
+
+.sliders {
+  font-size: 20px;
+  color: #e9cb8e;
+  line-height: 1;
+}
+
+#settings {
+  position: absolute;
+  bottom: calc(clamp(20px,4vh,42px) + 52px);
+  right: 3.1vw;
+  width: min(305px,94vw);
+  padding: 19px 22px 17px;
+  border-radius: 5px;
+  color: #ede5d4;
+  backdrop-filter: blur(18px);
+  max-height: 70dvh;
+  overflow: auto;
+}
+
+.setting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+h2 {
+  font-size: 25px;
+}
+
+#close {
+  background: none;
+  border: 0;
+  font-size: 24px;
+  line-height: 24px;
+  color: #d5bf99;
+}
+
+#settings label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  margin: 13px 0 7px;
+}
+
+output {
+  color: #dabc85;
+  font: 11px monospace;
+}
+
+input[type=range] {
+  width: 100%;
+  accent-color: #d5b475;
+  height: 8px;
+  margin: 4px 0;
+  cursor: pointer;
+}
+
+select {
+  width: 100%;
+  padding: 7px;
+  background: #1e2b29;
+  color: #eee1c8;
+  border: 1px solid #9385687a;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.switch {
+  border-top: 1px solid #827c634f;
+  padding-top: 14px;
+  cursor: pointer;
+  position: relative;
+}
+
+.switch input {
+  opacity: 0;
+  position: absolute;
+  right: 0;
+}
+
+.switch span {
+  width: 30px;
+  height: 16px;
+  background: #24312e;
+  border: 1px solid #a28e6c;
+  border-radius: 15px;
+  padding: 2px;
+}
+
+.switch span:before {
+  content: "";
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #a28e6c;
+}
+
+.switch input:checked+span:before {
+  transform: translateX(13px);
+  background: #f2d39b;
+}
+
+.switch input:focus-visible+span {
+  outline: 2px solid #f2d39b;
+}
+
+#fly-help {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #c5bdab;
+  margin-top: 9px;
+}
+
+.timeline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #262b25;
+}
+
+.timeline i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left;
+  background: #dcbd7c;
+}
+
+#loading {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #101815;
+  color: #e2cb9a;
+  font: 22px Georgia,serif;
+  text-align: center;
+  padding: 20px;
+}
+
+[hidden],#loading[hidden],.film #interface {
+  display: none!important;
+}
+
+@media(max-width:600px) {
+  header {
+    gap: 10px;
+    left: 18px;
+    top: 23px;
+  }
+
+  header p {
+    font-size: 7px;
+    letter-spacing: .23em;
+  }
+
+  .seal {
+    width: 31px;
+    height: 31px;
+  }
+
+  .clock {
+    top: auto;
+    bottom: 79px;
+    left: 20px;
+    right: auto;
+    font-size: 10px;
+  }
+
+  footer {
+    left: 18px;
+    right: 18px;
+  }
+
+  #settings {
+    right: 18px;
+  }
+
+}

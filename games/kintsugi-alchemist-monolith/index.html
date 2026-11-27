@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#101513" />
+    <meta
+      name="description"
+      content="An interactive porcelain and sound study in a moonlit Japanese courtyard."
+    />
+    <title>Kintsugi Sanctuary — Stillform Atelier</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='9' fill='%23101816'/%3E%3Cpath d='M6 16h28q-2 13-14 13T6 16m13 0 3 5-4 5 2 3' fill='none' stroke='%23d8b781' stroke-width='2'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <svg class="defs" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="seal" viewBox="0 0 48 48">
+          <g fill="none" stroke="currentColor" stroke-linejoin="round">
+            <circle cx="24" cy="24" r="21.5" stroke-width=".9" />
+            <circle
+              cx="24"
+              cy="24"
+              r="18.6"
+              stroke-width=".55"
+              stroke-dasharray="70 8 24 15"
+            />
+            <path
+              d="M10 22.3q14 3.5 28 0C35.5 30 31.6 33 24 33s-11-3-14-10.7ZM19 34.5h10m-8-11.2 4.9 3.2-2.7 2.7 3.5 4m-2.5-4.4-5 1.2M13 18.7q10.9-4.2 22-.9M16 15.6q8.4-3.4 15-.8"
+              stroke-width="1.25"
+            />
+          </g>
+        </symbol>
+        <symbol id="sound" viewBox="0 0 24 24">
+          <path d="M4 10v4m4-7v10m4-13v16m4-13v10m4-7v4" />
+        </symbol>
+        <symbol id="expand" viewBox="0 0 24 24">
+          <path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4" />
+        </symbol>
+        <symbol id="book" viewBox="0 0 24 24">
+          <path
+            d="M5 4.5h12a1.5 1.5 0 0 1 1.5 1.5v14H6a2 2 0 0 1-2-2V6a1.5 1.5 0 0 1 1-1.5Zm-.5 13h14M8 8h7m-7 3h5"
+          />
+        </symbol>
+        <symbol id="play" viewBox="0 0 24 24">
+          <path fill="currentColor" stroke="none" d="m8 4.6 12 7.4-12 7.4z" />
+        </symbol>
+        <symbol id="pause" viewBox="0 0 24 24">
+          <path stroke-width="3.5" d="M8.5 5.5v13m7-13v13" />
+        </symbol>
+        <symbol id="pulse-glyph" viewBox="0 0 24 24">
+          <path
+            d="m13.5 2-3 7-6 2 6.5 3-1 8 4.5-8 5.5-2.5-7-2 1-7ZM4 4l2.5 2.5M19 18l1.5 2M2 16l3-1"
+          />
+        </symbol>
+        <symbol id="orbit" viewBox="0 0 24 24">
+          <ellipse
+            cx="12"
+            cy="12"
+            rx="10"
+            ry="5"
+            transform="rotate(-25 12 12)"
+          />
+          <circle cx="12" cy="12" r="2" />
+        </symbol>
+        <symbol id="zoom" viewBox="0 0 24 24">
+          <rect x="6" y="2" width="12" height="20" rx="6" />
+          <path d="M12 6v4" />
+        </symbol>
+        <symbol id="ripple" viewBox="0 0 24 24">
+          <path
+            d="M12 2s-3 4-3 6a3 3 0 1 0 6 0c0-2-3-6-3-6Zm-6 11c-6 2 0 5 6 5s12-3 6-5m-15 4c-2 5 20 6 18 0"
+          />
+        </symbol>
+        <symbol id="cross" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M6 18 18 6" />
+        </symbol>
+      </defs>
+    </svg>
+    <main id="exhibit">
+      <header>
+        <div class="brand">
+          <svg class="seal"><use href="#seal" /></svg><span>Stillform</span
+          ><i></i><span class="brand-kind">Digital atelier</span>
+        </div>
+        <nav aria-label="Exhibit">
+          <button id="notes">
+            <svg><use href="#book" /></svg><span>Field notes</span></button
+          ><button id="sound-toggle" aria-pressed="false">
+            <svg><use href="#sound" /></svg
+            ><span id="sound-label">Sound off</span></button
+          ><button
+            class="square"
+            id="expand-view"
+            title="Enter cinema view"
+            aria-label="Enter cinema view"
+          >
+            <svg><use href="#expand" /></svg>
+          </button>
+        </nav>
+      </header>
+      <section
+        id="stage"
+        aria-label="Moonlit courtyard, interactive 3D artwork"
+      >
+        <canvas
+          id="sanctuary"
+          aria-label="Drag to orbit the porcelain vessel. Select the water to make ripples."
+        ></canvas>
+        <div class="shade"></div>
+        <div class="art-title">
+          <div class="eyebrow">
+            <span class="gold-rule"></span>Artifact study <b>/</b> 001
+          </div>
+          <h1>Kintsugi<br /><em>Sanctuary</em></h1>
+          <p>Over Mirror Water</p>
+        </div>
+        <div class="inscription" lang="ja">
+          <span>金継ぎ</span><span class="hanko">静</span>
+        </div>
+        <div class="phase"><i></i><span id="phase-name">Stillness</span></div>
+        <button
+          id="leave-cinema"
+          class="square"
+          title="Exit cinema view"
+          aria-label="Exit cinema view"
+        >
+          <svg><use href="#expand" /></svg>
+        </button>
+        <div id="load" role="status">Opening the courtyard…</div>
+      </section>
+      <section class="console" aria-label="Scene controls">
+        <div class="channel playback">
+          <button
+            class="play"
+            id="auto"
+            aria-label="Play 30-second auto showcase"
+            title="Play 30-second auto showcase"
+            aria-pressed="false"
+          >
+            <svg><use id="play-icon" href="#play" /></svg>
+          </button>
+          <div class="play-details">
+            <div class="control-title">Auto showcase</div>
+            <div class="time">
+              <output id="time">00:00</output><span>/</span> 00:30
+            </div>
+            <input
+              type="range"
+              id="timeline"
+              min="0"
+              max="30"
+              step=".01"
+              value="0"
+              aria-label="Showcase time"
+            />
+          </div>
+        </div>
+        <div class="channel fader">
+          <div class="row">
+            <label for="fracture">Fracture</label
+            ><output id="fracture-value">0%</output>
+          </div>
+          <input
+            id="fracture"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+            aria-label="Shatter or reassemble the relic"
+          />
+          <div class="ends"><span>Reassembled</span><span>Shattered</span></div>
+        </div>
+        <div class="channel fader">
+          <div class="row">
+            <label for="balance">Light balance</label
+            ><output id="balance-value">55%</output>
+          </div>
+          <input
+            id="balance"
+            type="range"
+            min="0"
+            max="100"
+            value="55"
+            aria-label="Gold glow versus moonlight balance"
+          />
+          <div class="ends"><span>Moonlight</span><span>Gold glow</span></div>
+        </div>
+        <div class="channel action">
+          <button id="pulse">
+            <svg><use href="#pulse-glyph" /></svg>Trigger shatter pulse
+          </button>
+        </div>
+      </section>
+      <footer>
+        <div class="hints">
+          <span
+            ><svg><use href="#orbit" /></svg>Drag to orbit</span
+          ><span
+            ><svg><use href="#zoom" /></svg>Scroll to zoom</span
+          ><span
+            ><svg><use href="#ripple" /></svg>Click water for ripples</span
+          >
+        </div>
+        <span class="medium">Porcelain <i>·</i> Lacquer <i>·</i> Gold</span>
+      </footer>
+    </main>
+    <dialog id="notes-dialog">
+      <div class="note-head">
+        <span class="eyebrow">Field notes <b>/</b> 001</span
+        ><button id="close-notes" class="square" aria-label="Close field notes">
+          <svg><use href="#cross" /></svg>
+        </button>
+      </div>
+      <h2>The moon jar</h2>
+      <p>
+        A crane and flowering plum circle a celadon body. Forty pieces follow
+        its curve, carrying the painting with them as the vessel opens.
+      </p>
+      <p>
+        Gold traces the broken edges while the pieces drift. As they settle
+        together, the release travels out across the shallow basin.
+      </p>
+      <div class="note-foot">Kintsugi Sanctuary <em>Over Mirror Water</em></div>
+    </dialog>
+    <audio id="score" src="./assets/sanctuary.m4a" preload="none" loop></audio>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

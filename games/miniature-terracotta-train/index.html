@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#ebe8df" />
+    <title>Alpine Midnight Miniature Express · Feldwerk</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%2397372e'/%3E%3Cpath d='m4 29 12-19 5 8 5-7 11 18H4Z' fill='none' stroke='%23fff2d7' stroke-width='2'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <svg class="defs" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="mount" viewBox="0 0 48 48">
+          <path
+            d="M5 30 19 9l8 12 5-7 11 16M13 24l6-5 4 4 3-3M8 34h32M13 38h22"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linejoin="round"
+          />
+        </symbol>
+        <symbol id="filmIcon" viewBox="0 0 24 24">
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M7 5v14m10-14v14M3 9h4m-4 6h4m10-6h4m-4 6h4" />
+        </symbol>
+        <symbol id="volume" viewBox="0 0 24 24">
+          <path d="M3 10h4l5-4v12l-5-4H3zm12-2q4 4 0 8m3-11q7 7 0 14" />
+        </symbol>
+        <symbol id="mute" viewBox="0 0 24 24">
+          <path d="M3 10h4l5-4v12l-5-4H3zm13-1 5 6m0-6-5 6" />
+        </symbol>
+        <symbol id="expand" viewBox="0 0 24 24"><path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5" /></symbol>
+        <symbol id="play" viewBox="0 0 24 24">
+          <path d="m8 5 11 7-11 7z" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="pause" viewBox="0 0 24 24"><path d="M8 5v14m8-14v14" stroke-width="3" /></symbol>
+        <symbol id="switch" viewBox="0 0 24 24">
+          <path d="M9 21V4m-3 17h7M9 5l10-2 1 4-11 2M6 13h4" />
+        </symbol>
+        <symbol id="orbit" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-27 12 12)" />
+          <path d="M10 5q6 5 5 13" />
+          <circle cx="12" cy="12" r="1.2" />
+        </symbol>
+        <symbol id="throttleIcon" viewBox="0 0 24 24">
+          <path d="M3 18a9 9 0 1 1 18 0H3Zm9-5 5-5M6 14h2m1-6 1 2m7 4h2" />
+          <circle cx="12" cy="14" r="1.5" />
+        </symbol>
+        <symbol id="weatherIcon" viewBox="0 0 24 24">
+          <path
+            d="M4 16a4 4 0 0 1 1-8 5 5 0 0 1 9 0 4 4 0 0 1 3 8H4Zm2 3-1 2m6-2-1 2m6-2-1 2M17 3l1-2m2 6 2-1"
+          />
+        </symbol>
+        <symbol id="focusIcon" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="m12 3 4 8m5-4-4 8m3 3-9-1m0 4-5-8m-3 1 5-8m-2 0 9 1" />
+        </symbol>
+        <symbol id="overview" viewBox="0 0 58 30">
+          <path d="m3 23 13-18 6 9 6-9 12 16 5-8 9 10M12 13l4-3 4 5m5-5 3 3 3-2m4 14 5-5m-33 6h45" />
+          <path d="M21 24c2-4 11-2 8-6" opacity=".6" />
+        </symbol>
+        <symbol id="viaduct" viewBox="0 0 58 30">
+          <path
+            d="m3 10 51-4m-50 7 49-4M7 13v12h3v-5q3-9 7-2v6h3v-7q3-9 7-2v8h3v-8q3-9 7-2v9h3V13q3-8 7-2v10h3V9M5 7l45-4M9 8V6m7 1V5m8 1V4m8 1V3m8 1V2"
+          />
+        </symbol>
+        <symbol id="chase" viewBox="0 0 58 30">
+          <path
+            d="M4 20h49l-3-5-3-1-1-7h-5l-1 7H27V9H13v11M11 8h18M16 11v5h6v-5zM26 15h13m9 0 2 4M4 15h6M2 12h7m-3 14h46"
+          />
+          <circle cx="19" cy="21" r="3" />
+          <circle cx="28" cy="21" r="3" />
+          <circle cx="37" cy="21" r="3" />
+          <circle cx="46" cy="21" r="2" />
+        </symbol>
+        <symbol id="cab" viewBox="0 0 58 30">
+          <path d="M8 26V8q20-10 41 0v18M12 23V10q6-3 14-3v12m5 0V7q9 0 14 3v13M7 26h44M14 23h29" />
+          <path d="M20 26v-4q0-6 9-6t9 6v4" />
+          <circle cx="29" cy="21" r="2" />
+        </symbol>
+      </defs>
+    </svg>
+    <header>
+      <div class="brand">
+        <span class="brandmark"
+          ><svg><use href="#mount" /></svg></span
+        ><span>Feldwerk<span class="atelier">MODEL RAILWAY ATELIER</span></span>
+      </div>
+      <nav aria-label="Exhibition">
+        <button id="exhibit" class="nav-active">Diorama</button
+        ><button id="openFilm">
+          <svg><use href="#filmIcon" /></svg>Screening room
+        </button>
+      </nav>
+      <button id="audio" class="audio" aria-pressed="false">
+        <svg><use href="#mute" /></svg><span>Sound off</span>
+      </button>
+    </header>
+    <main>
+      <div class="exhibition-title">
+        <div>
+          <div class="eyebrow"><span class="slash"></span>THE WINTER COLLECTION <i></i> STUDY 01</div>
+          <h1>Alpine Midnight <em>Miniature Express</em></h1>
+        </div>
+        <div class="edition">
+          <span class="edition-mark">H<span>0</span></span
+          ><span>MODEL SCALE<br /><b>1 : 87</b></span>
+        </div>
+      </div>
+      <section class="console">
+        <div class="viewer">
+          <div class="viewport" id="viewport">
+            <canvas id="railway" aria-label="Interactive alpine model railway"></canvas>
+            <div class="vignette"></div>
+            <div class="view-top">
+              <span class="view-live"><i></i> LIVE DIORAMA</span
+              ><button id="expandBtn" title="Expand view" aria-label="Expand view">
+                <svg><use href="#expand" /></svg>
+              </button>
+            </div>
+            <div class="view-bottom">
+              <div>
+                <div class="view-label" id="lensNo">CAMERA 01 / 04</div>
+                <span id="viewname">Diorama Overview</span>
+              </div>
+              <span class="orbit-hint"
+                ><svg><use href="#orbit" /></svg> Drag to orbit</span
+              >
+            </div>
+          </div>
+          <div class="transport">
+            <button id="auto" aria-pressed="false">
+              <svg><use href="#play" /></svg><span>Auto showcase</span></button
+            ><input
+              id="seek"
+              type="range"
+              min="0"
+              max="30"
+              step=".01"
+              value="0"
+              aria-label="Showcase playhead"
+            /><span class="time"><b id="seconds">00:00</b> / 00:30</span>
+          </div>
+        </div>
+        <aside>
+          <div class="desk-title">
+            <span class="small-kicker">OPERATOR’S PANEL</span>
+            <h2>Control desk</h2>
+          </div>
+          <div class="control">
+            <label for="throttle"
+              ><svg><use href="#throttleIcon" /></svg>Throttle</label
+            ><output id="speedOut" for="throttle">Cruise</output
+            ><input id="throttle" type="range" min="0" max="100" value="52" />
+            <div class="range-label"><span>Stop</span><span>Express</span></div>
+          </div>
+          <div class="control">
+            <label for="weather"
+              ><svg><use href="#weatherIcon" /></svg>Weather</label
+            ><output id="weatherOut" for="weather">Blue hour</output
+            ><input id="weather" type="range" min="0" max="100" value="48" />
+            <div class="range-label"><span>Golden dusk</span><span>Blizzard</span></div>
+          </div>
+          <div class="control focus">
+            <label for="focus"
+              ><svg><use href="#focusIcon" /></svg>Tilt-shift</label
+            ><button
+              id="dofToggle"
+              role="switch"
+              aria-checked="true"
+              aria-label="Enable tilt-shift"
+            ></button
+            ><input
+              id="focus"
+              type="range"
+              min="0"
+              max="100"
+              value="54"
+              aria-label="Tilt-shift strength"
+            />
+          </div>
+          <div class="camera-block">
+            <div class="small-kicker">CAMERA MODE</div>
+            <div class="camera-grid" role="group" aria-label="Camera mode">
+              <button data-camera="0" aria-pressed="true">
+                <svg><use href="#overview" /></svg><span>Diorama Overview</span>
+              </button>
+              <button data-camera="1" aria-pressed="false">
+                <svg><use href="#viaduct" /></svg><span>Viaduct Hero</span>
+              </button>
+              <button data-camera="2" aria-pressed="false">
+                <svg><use href="#chase" /></svg><span>Train Chase</span>
+              </button>
+              <button data-camera="3" aria-pressed="false">
+                <svg><use href="#cab" /></svg><span>Cab Ride</span>
+              </button>
+            </div>
+          </div>
+          <button id="signal">
+            <svg><use href="#switch" /></svg><span>Switch semaphore</span
+            ><span class="signal-state" id="aspect">Clear</span>
+          </button>
+        </aside>
+      </section>
+    </main>
+    <footer>
+      <span><i></i>FALKENGRAT MOUNTAIN LINE</span><span>SWISS ALPS <b>·</b> WINTER <b>·</b> 1912</span>
+    </footer>
+    <dialog id="cinema">
+      <div class="film-header">
+        <div>
+          <span class="small-kicker">SCREENING ROOM</span>
+          <h2>Alpine Midnight <em>Miniature Express</em></h2>
+        </div>
+        <button id="closeFilm" aria-label="Close screening room">×</button>
+      </div>
+      <p id="filmStatus" role="status"></p>
+      <video id="film" controls playsinline preload="none"></video>
+    </dialog>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

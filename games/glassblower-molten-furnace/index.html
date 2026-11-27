@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#171816" />
+    <title>The Glassblower’s Molten Furnace · Fornace</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ea8152'/%3E%3Cpath d='M7 25v-9a9 9 0 0118 0v9zM11 24v-8a5 5 0 0110 0v8' fill='none' stroke='%2320201c' stroke-width='2'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <svg class="defs" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="i-kiln" viewBox="0 0 32 32">
+          <path
+            d="M4 26V15a12 12 0 0 1 24 0v11H4Zm4 0V15a8 8 0 0 1 16 0v11M4 18h4m16 0h4M6 9l4 2m12 0 4-2M10 5l2 4m8 0 2-4M16 3v4M2 29h28"
+          />
+          <path d="M13 24c-3-3 3-5 2-9 5 3 6 7 3 9" />
+        </symbol>
+        <symbol id="i-mute" viewBox="0 0 24 24">
+          <path d="M3 9h4l5-4v14l-5-4H3zm13 0 5 6m0-6-5 6" />
+        </symbol>
+        <symbol id="i-sound" viewBox="0 0 24 24">
+          <path d="M3 9h4l5-4v14l-5-4H3zm13-1a5 5 0 0 1 0 8m3-11a9 9 0 0 1 0 14" />
+        </symbol>
+        <symbol id="i-full" viewBox="0 0 24 24">
+          <path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5" />
+        </symbol>
+        <symbol id="i-play" viewBox="0 0 24 24">
+          <path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24">
+          <path d="M7 5v14m9-14v14" stroke-width="4" />
+        </symbol>
+        <symbol id="i-orbit" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-28 12 12)" />
+          <circle cx="12" cy="12" r="2" />
+        </symbol>
+        <symbol id="i-cam" viewBox="0 0 24 24">
+          <path d="M3 7h4l2-3h6l2 3h4v13H3Z" />
+          <circle cx="12" cy="13" r="3.3" />
+        </symbol>
+        <symbol id="i-fire" viewBox="0 0 24 24">
+          <path
+            d="M13 2c1 5-3 6-2 10 2 0 3-2 4-4 4 4 5 7 3 11-3 4-10 4-13-1-2-5 3-7 4-11 1 2 1 3 2 3 2-3 2-6 2-8Z"
+          />
+        </symbol>
+        <symbol id="i-drop" viewBox="0 0 24 24">
+          <path d="M12 2c-2 4-7 9-7 13a7 7 0 0 0 14 0c0-4-5-9-7-13Z" />
+          <path d="M9 15a3 3 0 0 0 3 3" />
+        </symbol>
+        <symbol id="i-tune" viewBox="0 0 24 24">
+          <path d="M3 6h9m5 0h4M3 12h3m5 0h10M3 18h11m5 0h2" />
+          <circle cx="14.5" cy="6" r="2.5" />
+          <circle cx="8.5" cy="12" r="2.5" />
+          <circle cx="16.5" cy="18" r="2.5" />
+        </symbol>
+        <symbol id="i-macro" viewBox="0 0 24 24">
+          <circle cx="10" cy="10" r="6" />
+          <path d="m15 15 6 6m-14-11h6m-3-3v6" />
+        </symbol>
+        <symbol id="i-shelf" viewBox="0 0 24 24">
+          <path
+            d="M2 20h20M6 5h4m-3 0v4c0 2-3 3-3 6 0 3 8 3 8 0 0-3-3-4-3-6V5m6 4h4m-3 0v3c-3 4-2 6 1 6s4-2 1-6V9"
+          />
+        </symbol>
+      </defs>
+    </svg>
+    <header>
+      <div class="brand">
+        <span class="seal"
+          ><svg><use href="#i-kiln" /></svg></span
+        ><span>Fornace</span>
+      </div>
+      <span class="brand-sub">MURANO GLASS STUDIO</span>
+      <div class="top-actions">
+        <button id="sound" aria-pressed="false">
+          <svg><use href="#i-mute" /></svg><span>Sound off</span></button
+        ><span class="divider"></span
+        ><button id="full" title="Fullscreen" aria-label="Toggle fullscreen">
+          <svg><use href="#i-full" /></svg>
+        </button>
+      </div>
+    </header>
+    <main>
+      <div class="title-row">
+        <div>
+          <div class="kicker"><span></span> Interactive material study</div>
+          <h1>The Glassblower’s <em>Molten Furnace</em></h1>
+        </div>
+        <div class="catalog">
+          <span class="mark">✳</span> Vetro soffiato <small>HAND-BLOWN GLASS</small>
+        </div>
+      </div>
+      <div class="layout">
+        <section class="viewer" aria-label="Interactive workshop">
+          <div id="stage">
+            <canvas id="room" aria-label="Three-dimensional glassblower’s workshop"></canvas>
+            <div class="view-top">
+              <span class="live"><i></i> Live viewport</span><span id="lens">35 mm</span>
+            </div>
+            <div class="specimen">
+              <small>GLASS TEMPERATURE</small><span id="spec-temp">900 <b>°C</b></span>
+            </div>
+            <div class="orbit">
+              <svg><use href="#i-orbit" /></svg> Drag to orbit <span>·</span> Scroll to zoom
+            </div>
+          </div>
+          <div class="transport">
+            <button id="play" aria-label="Play Auto Showcase (30s)" aria-pressed="false">
+              <svg><use href="#i-play" /></svg>
+            </button>
+            <div class="transport-title">Auto showcase<small>30-SECOND FILM</small></div>
+            <input
+              type="range"
+              id="timeline"
+              min="0"
+              max="30"
+              step=".01"
+              value="0"
+              aria-label="Showcase timeline"
+            /><output id="clock">00:00 <i>/ 00:30</i></output>
+          </div>
+        </section>
+        <aside>
+          <div class="panel-head">
+            <h2>Studio controls</h2>
+            <svg><use href="#i-tune" /></svg>
+          </div>
+          <div class="settings">
+            <div class="field process">
+              <div class="line">
+                <label for="process">Process stage</label><output id="stage-count">03 / 04</output>
+              </div>
+              <strong id="stage-name">Twist &amp; Neck</strong
+              ><input
+                id="process"
+                type="range"
+                min="0"
+                max="1"
+                step=".001"
+                value=".55"
+                aria-label="Process stage and inflation"
+              />
+              <div class="range-ends"><span>Gather</span><span>Reveal</span></div>
+            </div>
+            <div class="field">
+              <div class="line">
+                <label for="heat">Furnace heat</label><output id="heat-label">1200 °C</output>
+              </div>
+              <input id="heat" type="range" min="650" max="1200" step="1" value="1200" />
+            </div>
+            <div class="field">
+              <div class="line">
+                <label for="spin">Pipe spin speed</label><output id="spin-label">12 rpm</output>
+              </div>
+              <input id="spin" type="range" min="0" max="30" step="1" value="12" />
+            </div>
+          </div>
+          <div class="camera">
+            <div class="section-label">Camera presets</div>
+            <div class="views">
+              <button data-cam="0" aria-pressed="true">
+                <svg><use href="#i-fire" /></svg>Furnace Glory Hole<span>↗</span>
+              </button>
+              <button data-cam="1" aria-pressed="false">
+                <svg><use href="#i-macro" /></svg>Molten Twist Macro<span>↗</span>
+              </button>
+              <button data-cam="2" aria-pressed="false">
+                <svg><use href="#i-shelf" /></svg>Workshop Shelf<span>↗</span>
+              </button>
+            </div>
+          </div>
+          <button id="quench">
+            <svg><use href="#i-drop" /></svg><span>Quench / Steam burst</span>
+          </button>
+        </aside>
+      </div>
+    </main>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

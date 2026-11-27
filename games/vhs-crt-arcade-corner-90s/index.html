@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#c9c5b7" />
+    <link rel="icon" href="data:," />
+    <title>1994 Midnight CRT &amp; VHS Sanctuary</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header>
+      <div class="identity">
+        <span class="tape-logo" aria-hidden="true"><i></i><i></i></span>
+        <h1>Midnight Sanctuary</h1>
+      </div>
+      <div class="format"><b>CRT &amp; VHS</b><span>ANALOG EDIT SUITE · 1994</span></div>
+      <div class="header-tools">
+        <span class="signal"><i></i><span id="lock">SIGNAL LOCK</span></span
+        ><button id="sound" aria-pressed="false" title="Toggle room audio">
+          <span aria-hidden="true">◖))</span> Audio</button
+        ><button id="full" aria-label="Toggle fullscreen" title="Fullscreen">⛶</button>
+      </div>
+    </header>
+    <main id="stage">
+      <canvas
+        id="room"
+        title="Drag to orbit · Scroll to zoom · Right-drag to pan"
+        aria-label="Interactive 1994 late-night editing room with seven animated CRTs"
+      ></canvas>
+      <div class="osd top"><span class="play"></span>PLAY <small>SP</small></div>
+      <div class="osd bottom"><i></i> CAM <span id="cam">01</span></div>
+      <div class="timecode" id="tc">00:00:00</div>
+    </main>
+    <footer>
+      <div class="bank">
+        <div class="bank-title"><span class="stripes"></span>SIGNAL CONTROL</div>
+        <div class="sliders">
+          <label
+            ><span>VHS tracking <output id="tracking-out">18</output></span
+            ><input
+              aria-label="VHS tracking and static glitch"
+              id="tracking"
+              type="range"
+              min="0"
+              max="100"
+              value="18" /></label
+          ><label
+            ><span>Phosphor glow <output id="glow-out">64</output></span
+            ><input
+              aria-label="CRT scanlines and phosphor glow"
+              id="glow"
+              type="range"
+              min="0"
+              max="100"
+              value="64"
+          /></label>
+        </div>
+      </div>
+      <div class="bank zap-bank">
+        <div class="bank-title">CHANNEL SELECT</div>
+        <button class="zap" id="zap"><b>↯</b> Degauss / Switch</button>
+      </div>
+      <div class="bank">
+        <div class="bank-title">ROOM CONTROL</div>
+        <div class="switches">
+          <button class="toggle" id="storm" aria-pressed="true"><i></i>Storm</button
+          ><button class="toggle" id="auto" aria-pressed="false">
+            <i></i>Auto showcase <small>30s</small>
+          </button>
+        </div>
+      </div>
+    </footer>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

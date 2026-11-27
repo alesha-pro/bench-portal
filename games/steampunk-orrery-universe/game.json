@@ -1,0 +1,18 @@
+{
+  "slug": "steampunk-orrery-universe",
+  "title": "The Brass Celestial Observatory",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js copper-domed observatory housing a glass-topped clockwork orrery with 210 toothed wheels, worm drives, and chains.",
+  "description": "An interactive Three.js / WebGL2 observatory and 30-second film. Forty copper leaves retract along the dome ribs above a mahogany library, revealing a glass-topped clockwork movement with 210 toothed wheels, eight worm drives, and two moving chains driving the armillary Sun and planetary arms.",
+  "accent": "#d9a95c",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Clockwork",
+    "Orrery",
+    "3D"
+  ],
+  "cover": "cover.webp"
+}

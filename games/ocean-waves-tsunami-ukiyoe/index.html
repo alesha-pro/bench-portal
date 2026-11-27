@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#eee8d9" />
+    <title>The Great Wave Reborn in 3D · Mokuhan Studio</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="mast">
+      <div class="studio">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span
+        ><span>Mokuhan <em>Studio</em></span
+        ><span class="brand-jp" lang="ja">木版工房</span>
+      </div>
+      <div class="mast-actions">
+        <button id="sound" class="sound" aria-pressed="false">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 9h4l5-4v14l-5-4H4z" />
+            <path class="mute" d="m17 9 5 6m0-6-5 6" /></svg
+          ><span>Sound off</span>
+        </button>
+        <button
+          id="showcase"
+          class="showcase"
+          aria-pressed="false"
+          aria-label="Auto Showcase (30s)"
+        >
+          <span class="playicon" aria-hidden="true">▶</span
+          ><span class="playlabel">Play showcase</span><small>30s</small>
+        </button>
+      </div>
+    </header>
+    <main>
+      <section class="plate" aria-label="Interactive three-dimensional print">
+        <div class="print">
+          <canvas
+            id="ocean"
+            aria-label="A curling Prussian-blue wave above three fishing boats and Mount Fuji. Drag to orbit and scroll to zoom."
+            tabindex="0"
+          ></canvas>
+          <div id="load">Preparing the woodblock print…</div>
+        </div>
+        <div id="progress"></div>
+      </section>
+      <section class="caption">
+        <div>
+          <div class="overline"><span class="redline"></span> Interactive woodblock print</div>
+          <h1>The Great Wave <em>Reborn in 3D</em></h1>
+        </div>
+        <div class="gesture">
+          <svg viewBox="0 0 24 24">
+            <ellipse cx="12" cy="13" rx="10" ry="4.4" transform="rotate(-23 12 13)" />
+            <path d="m4 9-1 5 5-1" />
+            <circle cx="12" cy="12" r="2" /></svg
+          >Drag to orbit <b>·</b> Scroll to zoom
+        </div>
+      </section>
+      <section class="console" aria-label="Print controls">
+        <div class="control camera">
+          <span class="label">Camera view</span>
+          <div class="switch">
+            <button id="front" aria-label="Classic Front Woodblock Alignment" aria-pressed="true">
+              Classic front</button
+            ><button id="sweep" aria-label="Full 3D Isometric Sweep" aria-pressed="false">
+              3D sweep
+            </button>
+          </div>
+        </div>
+        <div class="control">
+          <label class="label" for="surge"
+            >Wave surge <output for="surge" id="surge-val">67%</output></label
+          ><input
+            id="surge"
+            aria-label="Wave surge and crest curl"
+            type="range"
+            value="67"
+            min="0"
+            max="100"
+          />
+        </div>
+        <div class="control">
+          <label class="label" for="ink"
+            >Ink weight <output for="ink" id="ink-val">62%</output></label
+          ><input
+            id="ink"
+            aria-label="Ink outline weight"
+            type="range"
+            value="62"
+            min="0"
+            max="100"
+          />
+        </div>
+        <div class="control lighting">
+          <label class="label" for="light">Time of day</label>
+          <div class="selectwrap">
+            <span aria-hidden="true" id="daymark">☼</span
+            ><select id="light">
+              <option value="0">Golden Edo Sunset</option>
+              <option value="1">Moonlit Indigo</option>
+            </select>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

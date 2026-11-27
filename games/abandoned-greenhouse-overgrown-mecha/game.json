@@ -1,0 +1,18 @@
+{
+  "slug": "abandoned-greenhouse-overgrown-mecha",
+  "title": "The Moss-Grown Guardian",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js overgrown conservatory where a weathered mechanical guardian wakes to a blue morpho butterfly and releases dandelion seeds.",
+  "description": "An interactive Three.js / WebGL2 habitat and 30-second short film. Inside an abandoned glass conservatory, a weathered moss-draped guardian awakens to a blue morpho butterfly, opens its amber eye, and releases drifting dandelion seeds from a living clockwork terrarium.",
+  "accent": "#6ec97a",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Mecha",
+    "Nature",
+    "Atmospheric"
+  ],
+  "cover": "cover.webp"
+}

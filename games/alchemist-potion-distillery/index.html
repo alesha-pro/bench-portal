@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111411" />
+    <title>The Midnight Alchemist’s Glass Distillery</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main>
+      <canvas
+        id="atelier"
+        aria-label="Interactive three-dimensional glass distillery. Drag to orbit and scroll to zoom."
+      ></canvas>
+      <header class="interface">
+        <div class="signature">
+          <span class="seal" aria-hidden="true">☿</span>
+          <div>
+            <p>The Midnight Alchemist’s</p>
+            <h1>Glass Distillery</h1>
+          </div>
+        </div>
+        <div class="transport">
+          <button type="button" id="auto" aria-label="Auto Showcase (30s)" aria-pressed="true">
+            <span class="playmark" aria-hidden="true">Ⅱ</span> Auto Showcase
+            <span class="period">30s</span>
+          </button>
+          <div class="track"><i></i></div>
+        </div>
+      </header>
+      <footer class="interface">
+        <div class="viewgroup">
+          <span class="caption">Observation lens</span>
+          <nav aria-label="Camera presets">
+            <button class="selected" data-view="full">Full Apparatus</button
+            ><button data-view="drip">Spiral Drip Macro</button
+            ><button data-view="boil">Boiling Retort</button>
+          </nav>
+        </div>
+        <div class="parameter">
+          <label for="heat">Burner heat <output id="heatValue">1.0×</output></label
+          ><input
+            id="heat"
+            aria-label="Burner Heat / Boil Speed"
+            type="range"
+            min="0.25"
+            max="2.5"
+            value="1"
+            step=".05"
+          />
+        </div>
+        <div class="parameter">
+          <label for="glow">Caustics &amp; glow <output id="glowValue">100%</output></label
+          ><input id="glow" type="range" min="0" max="2" value="1" step=".05" />
+        </div>
+        <button class="impulse" id="add">
+          <span aria-hidden="true">✦</span> Add Philosopher’s Drop
+        </button>
+      </footer>
+      <div id="loading" role="status">Opening the distillery…</div>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

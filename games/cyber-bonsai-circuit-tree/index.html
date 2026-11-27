@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#101517" />
+    <link rel="icon" href="data:," />
+    <title>The Cyber-Bonsai · Kōbō Digital Arboretum</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+    <script>
+      if (new URLSearchParams(location.search).has("capture"))
+        document.documentElement.classList.add("capture");
+      if (new URLSearchParams(location.search).has("film"))
+        document.documentElement.classList.add("film");
+    </script>
+  </head>
+  <body>
+    <svg aria-hidden="true" class="symbols" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="mon" viewBox="0 0 40 40">
+          <g fill="currentColor">
+            <path
+              id="lobe"
+              d="M20 18C15 14 12 9 14 5Q16 1 20 4Q24 1 26 5C28 9 25 14 20 18Z"
+            />
+            <use href="#lobe" transform="rotate(72 20 20)" />
+            <use href="#lobe" transform="rotate(144 20 20)" />
+            <use href="#lobe" transform="rotate(216 20 20)" />
+            <use href="#lobe" transform="rotate(288 20 20)" />
+            <circle cx="20" cy="20" r="2" />
+          </g>
+        </symbol>
+        <symbol id="expand" viewBox="0 0 24 24">
+          <path d="M8 4H4v4m12-4h4v4M4 16v4h4m8 0h4v-4" />
+        </symbol>
+        <symbol id="tune" viewBox="0 0 24 24">
+          <path d="M4 7h7m5 0h4M4 17h3m5 0h8" />
+          <circle cx="13.5" cy="7" r="2.5" />
+          <circle cx="9.5" cy="17" r="2.5" />
+        </symbol>
+        <symbol id="pulse" viewBox="0 0 24 24">
+          <path d="M2 13h6l3-8 3 14 3-8 2 2h3" />
+        </symbol>
+        <symbol id="tree" viewBox="0 0 24 24">
+          <path d="M8 20h8m-4 0v-7m0 3-4-4m4 2 4-5" />
+          <path d="M4 12c-2-2 0-5 3-5-1-3 3-5 5-3 2-2 6-1 6 2 4 0 5 5 2 6H4Z" />
+        </symbol>
+        <symbol id="chip" viewBox="0 0 24 24">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
+          <rect x="9" y="9" width="6" height="6" rx=".7" />
+          <path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3" />
+        </symbol>
+        <symbol id="blossom" viewBox="0 0 24 24">
+          <path
+            d="M12 9c-6-7 6-7 0 0Zm3 2c4-8 10 2 0 0Zm-1 4c8 0 1 9 0 0Zm-4 0c-1 9-8 0 0 0Zm-1-4c-10 2-4-8 0 0Z"
+          />
+          <circle cx="12" cy="12" r="1.3" />
+        </symbol>
+        <symbol id="orbit" viewBox="0 0 24 24">
+          <ellipse
+            cx="12"
+            cy="12"
+            rx="10"
+            ry="4.4"
+            transform="rotate(-30 12 12)"
+          />
+          <circle cx="12" cy="12" r="2" />
+        </symbol>
+        <symbol id="arrow" viewBox="0 0 24 24">
+          <path d="M5 12h14m-6-6 6 6-6 6" />
+        </symbol>
+        <symbol id="check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4L19 6" />
+        </symbol>
+        <symbol id="play" viewBox="0 0 24 24">
+          <path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="pause" viewBox="0 0 24 24">
+          <path d="M8 5v14m8-14v14" stroke-width="3.6" />
+        </symbol>
+      </defs>
+    </svg>
+    <header>
+      <div class="brand">
+        <svg class="brandmark"><use href="#mon" /></svg><span>Kōbō</span><i></i
+        ><span class="brand-sub">Digital Arboretum</span>
+      </div>
+      <div class="header-right">
+        <span class="live"><i></i> Live exhibit</span><i class="divider"></i
+        ><button
+          id="fullscreen"
+          title="Toggle fullscreen"
+          aria-label="Toggle fullscreen"
+        >
+          <svg><use href="#expand" /></svg>
+        </button>
+      </div>
+    </header>
+    <main>
+      <div class="workspace">
+        <section class="stage" aria-label="Interactive cyber-bonsai specimen">
+          <canvas
+            id="specimen"
+            aria-label="Orbitable three-dimensional cyber-bonsai"
+          ></canvas>
+          <div class="exhibit">
+            <div class="kicker"><span></span> SPECIMEN NO. 001</div>
+            <h1>The Cyber-Bonsai</h1>
+            <p>Silicon &amp; Plum Blossoms</p>
+          </div>
+          <div class="stage-caption">
+            <span class="frame-icon"></span><b id="fig">FIG. 01</b><i></i
+            ><span id="view-name">Full tree</span>
+          </div>
+          <div class="gesture">
+            <svg><use href="#orbit" /></svg> Drag to orbit <i></i> Scroll to
+            zoom
+          </div>
+        </section>
+        <aside>
+          <div class="panel-heading">
+            <svg><use href="#tune" /></svg>
+            <h2>Exhibit controls</h2>
+          </div>
+          <fieldset class="modes">
+            <legend>Blossom color mode</legend>
+            <div id="modes"></div>
+          </fieldset>
+          <fieldset class="speed">
+            <legend>Growth / pulse speed</legend>
+            <output id="speed-value" for="speed">1.0×</output>
+            <input
+              id="speed"
+              type="range"
+              min="0.25"
+              max="2"
+              step=".05"
+              value="1"
+              aria-label="Branch growth and pulse speed"
+            />
+            <div class="endpoints"><span>0.25×</span><span>2.0×</span></div>
+          </fieldset>
+          <fieldset class="cameras">
+            <legend>Camera presets</legend>
+            <div id="cameras"></div>
+          </fieldset>
+          <div class="pulse-wrap">
+            <button id="surge">
+              <svg><use href="#pulse" /></svg><span>Data Pulse Surge</span
+              ><svg><use href="#arrow" /></svg></button
+            ><span role="status" id="pulse-status"></span>
+          </div>
+        </aside>
+      </div>
+      <footer>
+        <button
+          id="showcase"
+          aria-label="Auto Showcase (30s)"
+          aria-pressed="false"
+        >
+          <span class="playbox"
+            ><svg><use href="#play" /></svg></span
+          ><span>Auto showcase</span>
+        </button>
+        <div class="transport-line"></div>
+        <div class="timeline">
+          <input
+            id="seek"
+            aria-label="Showcase time"
+            type="range"
+            min="0"
+            max="30"
+            step=".01"
+            value="0"
+          />
+        </div>
+        <div class="clock"><b id="elapsed">00:00</b><span>/</span>00:30</div>
+      </footer>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

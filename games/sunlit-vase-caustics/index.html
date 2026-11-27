@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#242921" />
+    <title>Sunlit Apartment · Solstice</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23282d25'/%3E%3Ccircle cx='32' cy='32' r='16' fill='%23dfb879'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <symbol id="sun" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4" />
+          <path
+            d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"
+          />
+        </symbol>
+        <symbol id="ripple" viewBox="0 0 24 24">
+          <path d="M3 10q3-4 6 0t6 0 6 0M3 15q3-4 6 0t6 0 6 0" />
+        </symbol>
+        <symbol id="focus" viewBox="0 0 24 24">
+          <path d="M3 9V4h5m8 0h5v5m0 6v5h-5m-8 0H3v-5" />
+        </symbol>
+        <symbol id="orbit" viewBox="0 0 24 24">
+          <ellipse
+            cx="12"
+            cy="12"
+            rx="10"
+            ry="5"
+            transform="rotate(-30 12 12)"
+          />
+          <circle cx="12" cy="12" r="1.3" />
+        </symbol>
+        <symbol id="chevron" viewBox="0 0 24 24">
+          <path d="m6 14 6-6 6 6" />
+        </symbol>
+        <symbol id="sliders" viewBox="0 0 24 24">
+          <path d="M3 7h5m5 0h8M3 17h10m5 0h3" />
+          <circle cx="10.5" cy="7" r="2.4" />
+          <circle cx="15.5" cy="17" r="2.4" />
+        </symbol>
+      </defs>
+    </svg>
+    <main
+      id="scene"
+      aria-label="Orbit the sunlit apartment. Click or drag the glass vase to move the water."
+    ></main>
+    <div class="vignette"></div>
+    <header>
+      <div class="identity">
+        <span class="mark">✺</span><span class="brand">Solstice</span
+        ><span class="hairline"></span><span class="series">Light studies</span>
+      </div>
+      <button
+        id="focus-view"
+        aria-pressed="false"
+        aria-label="Toggle unobstructed view"
+        title="Toggle unobstructed view (H)"
+      >
+        <svg><use href="#focus" /></svg><span>Focus view</span>
+      </button>
+    </header>
+    <section class="intro">
+      <div class="phase">
+        <svg><use href="#sun" /></svg><span id="phase">Morning light</span>
+      </div>
+      <h1>Sunlit Apartment</h1>
+      <p>Glass, water &amp; live caustics</p>
+    </section>
+    <aside class="panel" aria-label="Atmosphere controls">
+      <button
+        class="panel-heading"
+        id="panel-toggle"
+        aria-expanded="true"
+        aria-controls="controls"
+      >
+        <svg><use href="#sliders" /></svg><span>Atmosphere</span
+        ><svg class="collapse"><use href="#chevron" /></svg>
+      </button>
+      <div id="controls">
+        <div class="control">
+          <label for="elevation"
+            >Sun elevation <output id="elevation-value">18°</output></label
+          ><input
+            id="elevation"
+            type="range"
+            min="-5"
+            max="80"
+            value="18"
+            step=".1"
+          />
+        </div>
+        <div class="control">
+          <label for="azimuth"
+            >Sun azimuth <output id="azimuth-value">−49°</output></label
+          ><input
+            id="azimuth"
+            type="range"
+            min="-75"
+            max="75"
+            value="-49"
+            step=".1"
+          />
+        </div>
+        <div class="divider"></div>
+        <div class="control">
+          <label for="caustics"
+            >Caustic intensity <output id="caustics-value">70%</output></label
+          ><input
+            id="caustics"
+            type="range"
+            min="0"
+            max="1.5"
+            value="1.05"
+            step=".01"
+          />
+        </div>
+        <div class="control">
+          <label for="clarity"
+            >Water clarity <output id="clarity-value">92%</output></label
+          ><input
+            id="clarity"
+            type="range"
+            min=".1"
+            max="1"
+            value=".92"
+            step=".01"
+          />
+        </div>
+        <div class="control">
+          <label for="breeze"
+            >Breeze strength <output id="breeze-value">30%</output></label
+          ><input
+            id="breeze"
+            type="range"
+            min="0"
+            max="1"
+            value=".3"
+            step=".01"
+          />
+        </div>
+        <button id="nudge">
+          <svg><use href="#ripple" /></svg> Nudge vase
+        </button>
+        <label class="showcase" for="auto"
+          ><span>Auto showcase <small>30s</small></span
+          ><input id="auto" type="checkbox" checked /><span
+            class="toggle"
+          ></span
+        ></label>
+      </div>
+    </aside>
+    <footer>
+      <div class="gesture">
+        <svg><use href="#orbit" /></svg> Drag to orbit <i></i> Scroll to zoom
+        <i></i> Drag vase to nudge
+      </div>
+      <div class="timeline">
+        <span id="elapsed">00:00</span>
+        <div class="track"><div id="progress"></div></div>
+        <span>00:30</span>
+      </div>
+    </footer>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

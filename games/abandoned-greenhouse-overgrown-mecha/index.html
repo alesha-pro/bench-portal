@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#15221c" />
+    <link rel="icon" href="data:," />
+    <title>The Moss-Grown Guardian · Stillwild Observatory</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas
+      id="habitat"
+      aria-label="Interactive three-dimensional conservatory and guardian"
+    ></canvas>
+    <svg class="symbols" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="icon-sprig" viewBox="0 0 40 40">
+          <g fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round">
+            <path
+              d="M8 34C18 28 24 18 29 5M16 27C11 27 7 24 6 19C12 18 16 22 16 27ZM20 21C14 20 12 16 12 12C17 12 21 17 20 21ZM24 15C21 12 20 8 21 5C25 7 26 10 24 15ZM19 23C19 18 25 17 30 18C28 22 23 25 19 23ZM24 15C25 10 30 10 34 10C32 14 29 16 24 15Z"
+            />
+          </g>
+        </symbol>
+        <symbol id="icon-sun" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3.7" />
+          <path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2" />
+        </symbol>
+        <symbol id="icon-mist" viewBox="0 0 24 24">
+          <path d="M2 8h12q5 0 5-3M5 12h15M2 16h9q5 0 5 3" />
+        </symbol>
+        <symbol id="icon-camera" viewBox="0 0 24 24">
+          <path d="M3 7h4l2-3h6l2 3h4v13H3z" />
+          <circle cx="12" cy="13" r="3.5" />
+        </symbol>
+        <symbol id="icon-eye" viewBox="0 0 24 24">
+          <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12Z" />
+          <circle cx="12" cy="12" r="2.7" />
+        </symbol>
+        <symbol id="icon-audio" viewBox="0 0 24 24">
+          <path d="M3 9h4l5-4v14l-5-4H3zM16 8q4 4 0 8m3-11q7 7 0 14" />
+        </symbol>
+        <symbol id="icon-expand" viewBox="0 0 24 24">
+          <path d="M3 9V3h6m6 0h6v6m0 6v6h-6m-6 0H3v-6" />
+        </symbol>
+        <symbol id="icon-sliders" viewBox="0 0 24 24">
+          <path d="M3 7h8m4 0h6M3 17h3m4 0h11" />
+          <circle cx="13" cy="7" r="2" />
+          <circle cx="8" cy="17" r="2" />
+        </symbol>
+        <symbol id="icon-orbit" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-28 12 12)" />
+          <circle cx="12" cy="12" r="3.4" />
+        </symbol>
+      </defs>
+    </svg>
+    <div id="interface">
+      <header>
+        <div class="wordmark">
+          <svg><use href="#icon-sprig" /></svg><span>Stillwild <i>Observatory</i></span>
+        </div>
+        <div class="utilities">
+          <span class="live"><i></i> Live habitat</span
+          ><button id="sound" aria-pressed="false" title="Toggle soundtrack">
+            <svg><use href="#icon-audio" /></svg><span>Sound off</span></button
+          ><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">
+            <svg><use href="#icon-expand" /></svg>
+          </button>
+        </div>
+      </header>
+      <div class="lower-shade"></div>
+      <section id="identity">
+        <div class="location"><span></span> Abandoned Conservatory</div>
+        <h1>The Moss-Grown<br /><em>Guardian</em></h1>
+      </section>
+      <aside id="panel" aria-label="Field controls">
+        <button id="fold" aria-expanded="true" aria-controls="instruments">
+          <span
+            ><svg><use href="#icon-sliders" /></svg> Field controls</span
+          ><span class="foldmark">−</span>
+        </button>
+        <div id="instruments">
+          <label for="sun"
+            ><span
+              ><svg><use href="#icon-sun" /></svg>Sun angle</span
+            ><output id="sun-read">Golden dawn</output></label
+          >
+          <input
+            id="sun"
+            type="range"
+            min="0"
+            max="100"
+            value="14"
+            aria-label="Sun angle and time"
+          />
+          <label for="mist"
+            ><span
+              ><svg><use href="#icon-mist" /></svg>Mist &amp; pollen</span
+            ><output id="mist-read">55%</output></label
+          >
+          <input
+            id="mist"
+            type="range"
+            min="0"
+            max="100"
+            value="55"
+            aria-label="Mist and pollen density"
+          />
+          <label for="preset" class="camera-label"
+            ><span
+              ><svg><use href="#icon-camera" /></svg>Camera</span
+            ></label
+          >
+          <div class="select">
+            <select id="preset">
+              <option value="film" hidden disabled>Showcase camera</option>
+              <option value="wide" selected>Conservatory Wide</option>
+              <option value="face">Guardian Face &amp; Butterfly</option>
+              <option value="heart">Glowing Chest Core</option>
+            </select>
+          </div>
+          <button id="wake" aria-pressed="false">
+            <svg><use href="#icon-eye" /></svg><span>Wake Guardian</span>
+          </button>
+        </div>
+      </aside>
+      <footer>
+        <button id="showcase" aria-pressed="false">
+          <span class="play"><i></i></span><span>Auto showcase</span>
+        </button>
+        <span id="counter">00:00</span
+        ><input
+          id="timeline"
+          type="range"
+          min="0"
+          max="30"
+          step=".01"
+          value="0"
+          aria-label="Seek 30 second film"
+        /><span class="duration">00:30</span>
+        <span class="gesture"
+          ><svg><use href="#icon-orbit" /></svg>Drag to orbit <b>·</b> Scroll to zoom</span
+        >
+      </footer>
+    </div>
+    <div id="loading">Opening the conservatory…</div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

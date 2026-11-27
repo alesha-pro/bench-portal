@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#171916" />
+    <link rel="icon" href="data:," />
+    <title>The Tiger and the Ink Dragon · Inkframe</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <header class="mast">
+      <div class="mast-inner">
+        <div class="identity">
+          <span class="brand-mark" data-icon="brand" aria-hidden="true"></span><span>Inkframe</span
+          ><span class="division"></span><span class="room">Screening Room</span>
+        </div>
+        <button class="hide" id="hide"><kbd>H</kbd><span>Hide interface</span></button>
+      </div>
+    </header>
+    <main>
+      <div class="heading">
+        <div>
+          <p class="series"><span></span> Living Sumi-e Scroll</p>
+          <h1>The Tiger <em>and the</em> Ink Dragon</h1>
+        </div>
+        <div class="spec">
+          <span class="silent-icon" data-icon="silent"></span> Silent film <b>·</b> 45 seconds
+        </div>
+      </div>
+      <section class="player" aria-label="Film player">
+        <div class="screen">
+          <canvas
+            id="film"
+            aria-label="A striped ink tiger duels a winged ink dragon on a silk-mounted scroll."
+          ></canvas>
+        </div>
+        <div class="transport">
+          <button id="play" class="play" aria-label="Play film" title="Play or pause (Space)">
+            <span id="play-symbol"></span>
+          </button>
+          <output id="clock" aria-label="Elapsed time">00:00</output>
+          <div class="track">
+            <div class="rail">
+              <div class="rail-fill"></div>
+              <i style="left: 15.5556%"></i><i style="left: 62.2222%"></i><i style="left: 84.4444%"></i>
+            </div>
+            <input
+              id="seek"
+              type="range"
+              min="0"
+              max="45"
+              step="0.01"
+              value="0"
+              aria-label="Timeline"
+            />
+          </div>
+          <span class="duration">00:45</span>
+          <div class="settings">
+            <button id="wet" class="effect" aria-pressed="true" title="Toggle ink wetness">
+              <span data-icon="drop"></span><span>Ink wetness</span><i></i>
+            </button>
+            <button id="gold" class="effect" aria-pressed="true" title="Toggle gold accents">
+              <span data-icon="spark"></span><span>Gold accent</span><i></i>
+            </button>
+          </div>
+        </div>
+      </section>
+      <nav class="chapters" aria-label="Film chapters">
+        <span class="chapters-title">Chapters</span>
+        <button data-time="0" aria-current="true"><small>00:00</small>The awakening</button>
+        <button data-time="7"><small>00:07</small>The duel</button>
+        <button data-time="28"><small>00:28</small>The collision</button>
+        <button data-time="38"><small>00:38</small>The final seal</button>
+      </nav>
+    </main>
+    <button id="show" class="hide" title="Show interface (H)" aria-label="Show interface">
+      <kbd>H</kbd>
+    </button>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

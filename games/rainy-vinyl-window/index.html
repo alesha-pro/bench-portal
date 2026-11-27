@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#101512" />
+    <title>Midnight Vinyl &amp; Rainy Window · Stillroom</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='23' fill='%23293530'/%3E%3Ccircle cx='24' cy='24' r='9' fill='%23dda96d'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="src/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas
+      id="room"
+      aria-label="Interactive turntable, tea and lamp beside a rainy window"
+    ></canvas>
+    <div id="interface">
+      <header>
+        <div class="brand">
+          <span class="mark" aria-hidden="true"></span>Stillroom
+        </div>
+        <span class="rule"></span
+        ><span class="micro archive">Listening sessions</span>
+        <div class="top-actions">
+          <button
+            id="sound"
+            aria-label="Enable sound"
+            class="soft"
+            aria-pressed="false"
+          >
+            <i data-icon="volumeOff"></i><span>Sound off</span></button
+          ><button
+            id="settings"
+            aria-label="Room controls"
+            class="soft"
+            aria-expanded="false"
+            aria-controls="mix"
+          >
+            <i data-icon="sliders"></i><span>Room controls</span>
+          </button>
+        </div>
+      </header>
+      <main class="caption">
+        <div class="kicker">
+          <span class="dash"></span> 33⅓ RPM &nbsp;/&nbsp; STEREO
+        </div>
+        <h1>Midnight Vinyl<br /><em>&amp; Rainy Window</em></h1>
+      </main>
+      <section id="mix" class="panel" aria-label="Room controls" hidden>
+        <div class="panel-head">
+          <h2>Room controls</h2>
+          <button
+            data-close="mix"
+            class="icon-only"
+            aria-label="Close room controls"
+          >
+            <i data-icon="x"></i>
+          </button>
+        </div>
+        <label
+          >Rain intensity <output for="rain"></output
+          ><input id="rain" type="range" min="0" max="100" value="75"
+        /></label>
+        <label
+          >Condensation <output for="fog"></output
+          ><input id="fog" type="range" min="0" max="100" value="52"
+        /></label>
+        <label
+          >Lamp warmth <output for="warmth"></output
+          ><input id="warmth" type="range" min="0" max="100" value="71"
+        /></label>
+        <button id="clear"><i data-icon="drop"></i>Clear fog</button>
+      </section>
+      <section id="crate" class="panel" aria-label="Record switcher" hidden>
+        <div class="panel-head">
+          <h2>Record crate</h2>
+          <button
+            data-close="crate"
+            class="icon-only"
+            aria-label="Close record crate"
+          >
+            <i data-icon="x"></i>
+          </button>
+        </div>
+        <div id="tracks"></div>
+      </section>
+      <footer>
+        <button
+          id="record"
+          aria-label="Switch record"
+          aria-expanded="false"
+          aria-controls="crate"
+        >
+          <img id="cover" alt="" /><span class="record-copy"
+            ><span class="micro"><b class="led"></b> On the turntable</span
+            ><strong id="title"></strong><small id="artist"></small></span
+          ><i data-icon="updown"></i>
+        </button>
+        <section class="transport" aria-label="Auto showcase">
+          <button
+            id="play"
+            class="play"
+            aria-label="Play auto showcase (30 seconds)"
+            aria-pressed="false"
+          >
+            <i data-icon="play"></i>
+          </button>
+          <div class="transport-inner">
+            <div class="transport-title">
+              <b>Auto showcase</b
+              ><span id="time">00:00 <small>/ 00:30</small></span>
+            </div>
+            <input
+              aria-label="Showcase time"
+              id="seek"
+              type="range"
+              min="0"
+              max="30"
+              step=".01"
+              value="0"
+            />
+          </div>
+        </section>
+        <button id="wipe" class="wipe" aria-pressed="false">
+          <i data-icon="hand"></i><span>Wipe glass</span>
+        </button>
+      </footer>
+    </div>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

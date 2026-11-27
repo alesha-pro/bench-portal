@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#102024">
+<title>The Brass Celestial Observatory &amp; Clockwork Orrery</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
+</head>
+<body>
+<canvas id="observatory" aria-label="Interactive three-dimensional brass orrery inside a copper-domed astronomical observatory"></canvas>
+<div id="interface">
+<header>
+<svg class="seal" viewBox="0 0 70 70" aria-hidden="true" fill="none" stroke="currentColor">
+<circle cx="35" cy="35" r="30" stroke-width=".8"/><circle cx="35" cy="35" r="27" stroke-width=".5" stroke-dasharray="1 3"/>
+<g transform="rotate(-31 35 35)"><ellipse cx="35" cy="35" rx="18" ry="21"/><ellipse cx="35" cy="35" rx="8" ry="21"/><ellipse cx="35" cy="35" rx="23" ry="6"/><path d="M35 9v52M31 57h8"/></g><circle cx="35" cy="35" r="3" fill="currentColor"/>
+</svg>
+<div><div class="eyebrow">The Brass Celestial</div><h1>Observatory</h1><p>&amp; Clockwork Orrery</p></div>
+</header>
+<section id="controls" aria-label="Observatory controls">
+<button id="panel-toggle" aria-expanded="true" aria-controls="instruments"><span class="symbol">⌖</span> Instrument controls <span id="fold">−</span></button>
+<div id="instruments">
+<label for="dome"><span>Dome aperture</span><output id="dome-out">86%</output></label>
+<input id="dome" type="range" min="0" max="100" value="86">
+<label for="speed"><span>Orrery time speed</span><output id="speed-out">1.0×</output></label>
+<input id="speed" type="range" min="1" max="200" value="10" aria-valuetext="1.0 times">
+<label for="flux"><span>Solar corona</span><output id="flux-out">100%</output></label>
+<input id="flux" type="range" min="0" max="220" value="100">
+<fieldset><legend>Planet focus</legend><div class="presets"><button data-focus="Sun">Sun</button><button data-focus="Earth">Earth</button><button data-focus="Saturn">Saturn</button><button class="chosen" data-focus="Dome Wide">Dome Wide</button></div></fieldset>
+<button id="show" aria-pressed="false"><span id="play">▷</span> Auto Showcase <span class="duration">30s</span></button>
+</div></section>
+<footer><span id="chapter-index">✧</span><div><div class="eyebrow" id="chapter-kicker">Orrery chamber</div><div id="chapter-name">Dome Wide</div></div><time id="time"></time></footer>
+</div>
+<div id="loading">Opening the observatory…</div>
+<script type="module" src="./src/main.js"></script>
+</body></html>

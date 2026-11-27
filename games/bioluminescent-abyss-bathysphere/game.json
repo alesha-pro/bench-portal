@@ -1,0 +1,18 @@
+{
+  "slug": "bioluminescent-abyss-bathysphere",
+  "title": "Bioluminescent Abyss & Bathysphere",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "An interactive Three.js deep-sea dive into a volcanic trench at 4,000 m with acoustic sonar pings, a giant squid, and drifting bioluminescence.",
+  "description": "An interactive Three.js dive and 30-second short film following Bathysphere IV into a volcanic trench at 4,000 m. Trigger sonar returns to illuminate hydrothermal vents and a giant squid above the smokers, switch between exterior and cockpit cameras, and watch a siphonophore and pelagic rays drift past the viewport.",
+  "accent": "#34e8d2",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "GLSL",
+    "Volumetrics",
+    "Underwater"
+  ],
+  "cover": "cover.webp"
+}

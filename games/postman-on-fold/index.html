@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#eee9dc" />
+    <title>Postman on the Fold — A little distance, a little kindness.</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='12' width='56' height='40' rx='4' fill='%23ad513a'/%3E%3Cpath d='m4 12 28 24 28-24' fill='none' stroke='%23fff4dc' stroke-width='3'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="src/style.css" />
+    <script type="importmap">
+      { "imports": { "three": "./vendor/three/build/three.module.js" } }
+    </script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header>
+      <div class="brand">
+        <div class="eyebrow">
+          <span class="tiny-envelope">✉</span> FOLD VALLEY POSTAL SERVICE
+        </div>
+        <h1>Postman <em>on the Fold</em><span class="title-dot">.</span></h1>
+        <p>An interactive paper atlas</p>
+      </div>
+      <div class="postmark" aria-hidden="true" id="postage"></div>
+      <button
+        id="sound"
+        class="sound"
+        aria-label="Enable sound"
+        aria-pressed="false"
+      >
+        <span>♫</span> <span id="sound-label">Sound off</span>
+      </button>
+    </header>
+    <main id="stage" aria-label="Interactive three dimensional paper valley">
+      <canvas
+        id="world"
+        aria-label="Fold the illustrated paper map to connect the postman's road"
+      ></canvas>
+      <div class="chapter-note">
+        <span class="eyebrow">DELIVERY ADDRESS</span>
+        <h2 id="recipient">The riverside cottage</h2>
+        <p id="note">“Some things are worth<br />bringing a little closer.”</p>
+        <span class="note-rule"></span
+        ><span id="chapter-number">01 — THE BRIDGE FOLD</span>
+      </div>
+      <div class="map-caption">
+        <span class="north">↑</span><span>N</span><i>Fold Valley</i
+        ><small>POSTAL DISTRICT 03</small>
+      </div>
+      <div id="destination-label" class="map-label">
+        <span class="pin-dot"></span
+        ><span id="destination-text">A letter for Ada</span>
+      </div>
+      <div
+        id="fold-handle"
+        class="fold-handle"
+        role="button"
+        tabindex="0"
+        aria-label="Drag or click to fold the paper"
+      >
+        <svg viewBox="0 0 48 48"><path d="m12 30 12-15 12 15M24 15v25" /></svg>
+      </div>
+      <div id="delivery" class="delivery" aria-live="polite">
+        <span>✉</span>
+        <div>
+          <small>FOLD VALLEY POSTAL SERVICE</small
+          ><strong id="receipt">Letter delivered</strong>
+        </div>
+      </div>
+      <div class="scene-index">
+        <span id="scene-index">01</span><span>/</span><span>03</span>
+      </div>
+      <div class="fold-guide">
+        <div class="guide-icon">
+          <svg viewBox="0 0 80 46">
+            <path d="m4 34 22-8 14-20 14 20 22 8-23 8-13-7-13 7Z" />
+            <path d="M26 26 40 35 54 26" stroke-dasharray="3 3" />
+          </svg>
+        </div>
+        <span id="guide-title">Fold the map</span
+        ><small id="guide-text">Drag the crease or use the slider below.</small>
+      </div>
+    </main>
+    <section class="control-deck" aria-label="Route and folding controls">
+      <div class="route-area">
+        <div class="eyebrow route-heading">CHOOSE A POSTAL ROUTE</div>
+        <nav id="routes" aria-label="Choose a route">
+          <button class="route active" data-route="0" aria-pressed="true">
+            <span class="route-number">01</span
+            ><svg viewBox="0 0 70 40">
+              <path
+                d="M3 29q10-24 24 0m16 0q14-24 24 0M4 34h23m16 0h23M32 8q-8 8 2 14t0 14m7-28q-8 8 2 14t0 14"
+              /></svg
+            ><span
+              ><strong>Bridge Fold</strong
+              ><small>Across the little river</small></span
+            ><span class="route-check">↗</span>
+          </button>
+          <button class="route" data-route="1" aria-pressed="false">
+            <span class="route-number">02</span
+            ><svg viewBox="0 0 70 40">
+              <path
+                d="m3 34 23-25 17 25m-8 0 16-18 16 18M23 13l3-4 5 7m-7 16h8V22h-8Z"
+              /></svg
+            ><span
+              ><strong>Hilltop Shortcut</strong
+              ><small>A climb made kinder</small></span
+            ><span class="route-check">↗</span>
+          </button>
+          <button class="route" data-route="2" aria-pressed="false">
+            <span class="route-number">03</span
+            ><svg viewBox="0 0 70 40">
+              <path
+                d="m29 35 4-19h8l4 19Zm8-19V3m0 13 15-9M37 16l15 10M37 16l-14 9M37 16 23 7M19 36h36"
+              /></svg
+            ><span
+              ><strong>Windmill Loop</strong
+              ><small>Round to an old friend</small></span
+            ><span class="route-check">↗</span>
+          </button>
+        </nav>
+      </div>
+      <div class="fold-control">
+        <div class="fold-top">
+          <label for="fold">PAPER FOLD</label
+          ><output id="fold-value">0%</output>
+        </div>
+        <input
+          id="fold"
+          type="range"
+          min="0"
+          max="100"
+          value="0"
+          aria-label="Paper fold amount"
+        />
+        <div class="fold-bottom">
+          <span id="fold-status"><i></i> Two ends, one little gap</span
+          ><button id="reset" aria-label="Reset current route">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+    <footer>
+      <div class="footer-left">
+        <span class="letter-icon">✉</span
+        ><span id="story-caption"
+          >Bring the two red road markers together.</span
+        >
+      </div>
+      <div class="playback">
+        <button id="play">
+          <span id="play-icon">▶</span><span id="play-label">Auto Story</span
+          ><small>35s</small>
+        </button>
+        <div
+          class="timeline"
+          id="timeline"
+          role="slider"
+          tabindex="0"
+          aria-label="Story progress"
+          aria-valuemin="0"
+          aria-valuemax="35"
+          aria-valuenow="0"
+        >
+          <i id="progress"></i>
+        </div>
+        <span class="time" id="time">00:00 / 00:35</span>
+      </div>
+    </footer>
+    <div class="film-titles" aria-hidden="true">
+      <span id="film-kicker"></span>
+      <h2 id="film-title"></h2>
+      <p id="film-copy"></p>
+    </div>
+    <div class="film-footer">
+      <span>FOLD VALLEY POSTAL SERVICE</span><i></i
+      ><span id="film-route"></span>
+    </div>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

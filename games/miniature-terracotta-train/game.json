@@ -1,0 +1,18 @@
+{
+  "slug": "miniature-terracotta-train",
+  "title": "Alpine Midnight Miniature Express",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "A tilt-shift Three.js model railway on an oak bench where a green-and-brass tank engine hauls teak coaches across a seven-arch viaduct.",
+  "description": "An interactive Three.js / WebGL2 model railway and 30-second short film. The fictional Falkengrat line sits on an oak modelmaker's bench as a green-and-brass tank engine hauls three teak passenger coaches and a rear observation car out of the west tunnel and over a seven-arch viaduct under tilt-shift optics.",
+  "accent": "#c85b48",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Diorama",
+    "Miniature",
+    "Tilt-Shift"
+  ],
+  "cover": "cover.webp"
+}

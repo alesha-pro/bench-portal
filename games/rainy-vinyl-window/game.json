@@ -1,0 +1,18 @@
+{
+  "slug": "rainy-vinyl-window",
+  "title": "Midnight Vinyl & Rainy Window",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "An interactive WebGL2 rainy listening room with a spinning turntable, steaming porcelain, and rain-streaked glass overlooking a wet tram line.",
+  "description": "An interactive WebGL2 listening room and 30-second short film. The camera opens on the stylus and orange platter strobe, passes the listening journal and steaming porcelain, looks down a wet midnight tram line through rain-streaked window glass, and pulls back to reveal the whole desk.",
+  "accent": "#dda96d",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Rain",
+    "Audio",
+    "Atmospheric"
+  ],
+  "cover": "cover.webp"
+}

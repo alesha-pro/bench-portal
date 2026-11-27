@@ -1,0 +1,18 @@
+{
+  "slug": "kintsugi-alchemist-monolith",
+  "title": "Kintsugi Sanctuary Over Mirror Water",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "An interactive Three.js sanctuary where a fractured celadon moon jar orbits above mirror water as molten gold seams reunite its shards.",
+  "description": "An interactive Three.js / WebGL2 artwork and 30-second film. A crane-painted celadon moon jar opens into forty orbiting shards above a Japanese courtyard mirror basin while molten gold beads gather along the broken edges, drip into gilded ripples, and pull the shards back into lacquer seams.",
+  "accent": "#d8b781",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Kintsugi",
+    "Bloom",
+    "Reflections"
+  ],
+  "cover": "cover.webp"
+}

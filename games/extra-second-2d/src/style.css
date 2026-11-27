@@ -1,0 +1,131 @@
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #12272d;
+  color: #f2e0c1;
+  overflow: hidden;
+}
+main {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+canvas {
+  width: min(100vw, 177.77778vh);
+  height: min(100vh, 56.25vw);
+  display: block;
+}
+footer {
+  position: absolute;
+  inset: auto 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 32px;
+  padding: 58px 3.2vw 23px;
+  background: linear-gradient(transparent, #10252ce3);
+  transition: opacity 0.2s;
+}
+h1 {
+  font:
+    italic 25px/1 Georgia,
+    serif;
+  margin: 0 0 6px;
+  text-shadow: 0 1px 5px #213333;
+}
+.credit > span {
+  font:
+    9px/1.2 Georgia,
+    serif;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #dec89e;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  width: min(42vw, 540px);
+  gap: 15px;
+  font:
+    11px/1 system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+button {
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid #e8d4ab80;
+  flex: none;
+}
+#play {
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
+}
+#hide {
+  border-radius: 3px;
+  font: 10px monospace;
+  padding: 3px 5px;
+}
+.time {
+  white-space: nowrap;
+}
+.divider {
+  margin: 0 6px;
+  opacity: 0.5;
+}
+input {
+  min-width: 35px;
+  flex: 1;
+  appearance: none;
+  height: 3px;
+  cursor: pointer;
+  margin: 0;
+}
+input::-webkit-slider-thumb {
+  appearance: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f4d7a3;
+}
+button:hover {
+  background: #dfc79922;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #ffe2a0;
+  outline-offset: 5px;
+}
+.hud-hidden .hud {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+@media (max-width: 650px) {
+  footer {
+    padding: 30px 15px 14px;
+    gap: 10px;
+    align-items: center;
+  }
+  h1 {
+    font-size: 18px;
+  }
+  .transport {
+    width: 53vw;
+    gap: 7px;
+  }
+  .credit > span {
+    font-size: 7px;
+  }
+  .time {
+    font-size: 9px;
+  }
+}

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#18242f" />
+    <title>Gravity Sanctuary · Axiom Gallery</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <svg class="sprites" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="mark" viewBox="0 0 38 38">
+          <path
+            d="M19 2 35.5 30.5 28 35 19 19.5 13 30H3L19 2Z M19 10 7.5 29.7 M19 10l11 19.2 M13 30l6-3.5 5.1 8.6L28 35 M19 19.5l3.5-2"
+          />
+        </symbol>
+        <symbol id="expand" viewBox="0 0 24 24">
+          <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" />
+        </symbol>
+        <symbol id="sound" viewBox="0 0 24 24">
+          <path d="m4 9 4 0 5-4v14l-5-4H4z M16 9q3 3 0 6m3-9q5 6 0 12" />
+        </symbol>
+        <symbol id="mute" viewBox="0 0 24 24">
+          <path d="m3 9 4 0 5-4v14l-5-4H3z M16 9l5 6m0-6-5 6" />
+        </symbol>
+        <symbol id="axis" viewBox="0 0 24 24">
+          <path d="m12 2 0 11 9 5m-9-5-9 5M9.5 5 12 2l2.5 3M3 14.5V18l3.5.1m11 0L21 18v-3.5" />
+        </symbol>
+        <symbol id="align" viewBox="0 0 24 24">
+          <path d="m12 3 9 16H3L12 3z M12 8l4.2 7.5H7.8L12 8z" />
+        </symbol>
+        <symbol id="flow" viewBox="0 0 24 24">
+          <path d="M2 7q3-4 7 0t8 0q3-3 5-1M2 12q3-4 7 0t8 0q3-3 5-1M2 17q3-4 7 0t8 0q3-3 5-1" />
+        </symbol>
+        <symbol id="lamp" viewBox="0 0 24 24">
+          <path d="M8 8V6a4 4 0 0 1 8 0v2 M6 9h12l-2 10H8L6 9z M5 9h14m-11 12h8 M12 12v4" />
+        </symbol>
+        <symbol id="orbit" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)" />
+          <circle cx="12" cy="12" r="2" />
+        </symbol>
+        <symbol id="play" viewBox="0 0 24 24">
+          <path d="m8 5 11 7-11 7z" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="pause" viewBox="0 0 24 24">
+          <path d="M8 5v14m8-14v14" stroke-width="3" />
+        </symbol>
+        <symbol id="icon-rotate" viewBox="0 0 24 24">
+          <path d="M20 10a8 8 0 1 0-.7 6M20 4v6h-6" />
+        </symbol>
+      </defs>
+    </svg>
+    <main>
+      <canvas
+        id="world"
+        aria-label="An interactive three-dimensional citadel with interlocking staircases"
+      ></canvas>
+      <div class="shade"></div>
+      <header>
+        <div class="identity">
+          <svg class="mark"><use href="#mark" /></svg><span>AXIOM</span><i></i
+          ><small>Gallery of Impossible Arts</small>
+        </div>
+        <div class="tools">
+          <button
+            id="audio"
+            class="round"
+            aria-label="Enable soundtrack"
+            title="Enable soundtrack"
+            aria-pressed="false"
+          >
+            <svg><use href="#mute" /></svg></button
+          ><button id="full" class="round" aria-label="Enter fullscreen" title="Fullscreen">
+            <svg><use href="#expand" /></svg>
+          </button>
+        </div>
+      </header>
+      <section class="intro" aria-label="Exhibit">
+        <div class="eyebrow"><span></span> Interactive architecture</div>
+        <p class="possessive">Escher’s Impossible</p>
+        <h1>Gravity<br /><em>Sanctuary</em></h1>
+        <p class="desc">
+          Follow the lanterns through a citadel<br class="wide" />
+          where gravity runs three ways.
+        </p>
+        <button id="showcase" aria-label="Auto Showcase (30s)" aria-pressed="false">
+          <svg><use href="#play" /></svg><span>Play showcase</span><b>30s</b>
+        </button>
+      </section>
+      <div class="navigation">
+        <svg><use href="#orbit" /></svg><span>Drag to orbit <i>·</i> Scroll to zoom</span>
+      </div>
+      <section class="controls" aria-label="Scene controls">
+        <div class="control axis">
+          <div class="label">
+            <svg><use href="#axis" /></svg> Gravity axis
+          </div>
+          <div class="axis-row">
+            <div class="choices" role="group" aria-label="Gravity axis">
+              <button data-axis="X">+X</button><button data-axis="Y" aria-pressed="true">+Y</button
+              ><button data-axis="Z">+Z</button>
+            </div>
+            <button
+              id="rotate"
+              class="rotate"
+              aria-label="Rotate Gravity Axis"
+              title="Rotate gravity axis"
+            >
+              <svg><use href="#icon-rotate" /></svg>
+            </button>
+          </div>
+        </div>
+        <div class="control optical">
+          <div class="label">
+            <svg><use href="#align" /></svg> Optical illusion
+          </div>
+          <button id="alignment" aria-label="Optical Illusion Alignment Mode" aria-pressed="false">
+            <span>Align perspective</span><i class="switch"></i>
+          </button>
+        </div>
+        <label class="control"
+          ><span class="label"
+            ><svg><use href="#lamp" /></svg> Lantern warmth</span
+          ><span class="range-row"
+            ><input
+              id="warm"
+              aria-label="Lantern warmth"
+              type="range"
+              min="0"
+              max="100"
+              value="78"
+            /><output for="warm">78%</output></span
+          ></label
+        >
+        <label class="control"
+          ><span class="label"
+            ><svg><use href="#flow" /></svg> Flow speed</span
+          ><span class="range-row"
+            ><input
+              id="speed"
+              aria-label="Flow speed"
+              type="range"
+              min="0"
+              max="200"
+              step="5"
+              value="100"
+            /><output for="speed">1.0×</output></span
+          ></label
+        >
+      </section>
+      <p id="error" role="alert" hidden></p>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "slug": "kinetic-sand-pendulum-cathedral",
+  "title": "The Sacred Pendulum",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive Three.js travertine rotunda where a dual-cable brass pendulum traces slowly precessing Lissajous patterns into glowing sand.",
+  "description": "An interactive Three.js harmonograph and 30-second film. Inside a vaulted travertine rotunda lit by an oculus, a dual-cable brass plumb bob carves a slowly precessing rose into illuminated sand with live harmonograph tuning and synthesized acoustic resonance.",
+  "accent": "#d6b781",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "Harmonograph",
+    "Sand",
+    "Architecture"
+  ],
+  "cover": "cover.webp"
+}

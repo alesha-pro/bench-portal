@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#211a19" />
+    <meta
+      name="description"
+      content="An articulated shadow play for oil lamp, cut paper and a traveling flame."
+    />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="src/theater.css" />
+    <title>The Shadow Theater of Oiled Rice Paper · Театр теней на рисовой бумаге</title>
+  </head>
+  <body>
+    <main class="theater" aria-label="The Shadow Theater of Oiled Rice Paper">
+      <canvas
+        role="img"
+        aria-label="A traveler and a paper crane carry a lantern through a bamboo forest and encounter a storm dragon."
+      ></canvas>
+      <div class="transport" role="group" aria-label="Film controls">
+        <div class="playback">
+          <button id="play" type="button" aria-label="Pause" title="Play or pause (Space)">
+            <span class="symbol" aria-hidden="true"></span>
+          </button>
+          <output id="time" for="timeline">0:00</output>
+          <input type="range" id="timeline" min="0" max="45" step=".01" value="0" aria-label="Timeline" />
+          <span class="duration">0:45</span>
+        </div>
+        <div class="lamp">
+          <label for="warmth">Oil lamp warmth</label>
+          <input type="range" id="warmth" min="0" max="100" step="1" value="62" />
+          <button id="hide" type="button" aria-label="Hide controls" title="Hide controls (H)">H</button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

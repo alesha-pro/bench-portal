@@ -1,0 +1,17 @@
+{
+  "slug": "paper-whale-canal",
+  "title": "The Paper Whale Over the Canal",
+  "category": "visuals",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "v2 · November 2026",
+  "summary": "A 45-second Canvas 2D animated loop where a child's paper boat unfolds into a gilded whale soaring above a snowy lantern-lit canal.",
+  "description": "A 45-second illustrated Canvas 2D loop. A boatman lights lanterns along a snowy canal as a child launches a paper boat whose folds open into a gilded whale above the pagoda roofs, rounding the belltower before dissolving back toward the water as gold snow.",
+  "accent": "#e5b869",
+  "tags": [
+    "Canvas 2D",
+    "Animation",
+    "Short Film",
+    "Procedural"
+  ],
+  "cover": "cover.webp"
+}

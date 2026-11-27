@@ -1,0 +1,18 @@
+{
+  "slug": "postman-on-fold",
+  "title": "Postman on the Fold",
+  "category": "showcases",
+  "model": "GPT-6.2-Astra xhigh",
+  "version": "November 2026",
+  "summary": "An interactive folding Three.js paper atlas of a valley where you crease pleats to connect red-striped roads for a cycling postman.",
+  "description": "An interactive folding paper atlas of Fold Valley with three letters to deliver. A red-striped road ends at either side of a pleat; folding the crease brings the road ends into contact so the postman can cycle across the seam past circling swallows, turning windmill sails, and a folded river skiff. Includes Bridge Fold, Hilltop Shortcut, Windmill Loop, manual fold dragging, Auto Story mode, and synthesized Web Audio sound.",
+  "accent": "#d46a4e",
+  "tags": [
+    "Three.js",
+    "WebGL2",
+    "SVG",
+    "Interactive",
+    "Paper"
+  ],
+  "cover": "cover.webp"
+}
